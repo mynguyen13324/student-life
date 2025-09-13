@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/sidebar";
 
 const navItems = [
-  { path: "/", label: "Dashboard", icon: BarChart3 },
+  { path: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { path: "/schedule", label: "Lịch học", icon: Calendar },
   { path: "/tasks", label: "Task", icon: CheckSquare },
   { path: "/expenses", label: "Chi tiêu", icon: DollarSign },
