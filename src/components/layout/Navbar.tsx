@@ -11,11 +11,13 @@ import {
 } from "lucide-react";
 
 const navItems = [
-  { path: "/", label: "Dashboard", icon: BarChart3 },
+  // SỬA Ở ĐÂY: Đổi path của Dashboard từ "/" thành "/dashboard"
+  { path: "/dashboard", label: "Dashboard", icon: BarChart3 },
   { path: "/schedule", label: "Lịch học", icon: Calendar },
   { path: "/tasks", label: "Task", icon: CheckSquare },
   { path: "/expenses", label: "Chi tiêu", icon: DollarSign },
-  { path: "/chat", label: "Chat AI", icon: MessageCircle },
+  // SỬA Ở ĐÂY: Đổi path từ "/chat" thành "/chat-ai"
+  { path: "/chat-ai", label: "Chat AI", icon: MessageCircle },
   { path: "/profile", label: "Hồ sơ", icon: User },
 ];
 

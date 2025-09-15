@@ -36,7 +36,7 @@ const Index = () => {
       title: 'Chat AI',
       description: 'Trợ lý AI hỗ trợ học tập',
       icon: MessageCircle,
-      path: '/chat'
+      path: '/chat-ai' // <-- Sửa lại đường dẫn cho đúng với file router của bạn
     },
     {
       title: 'Hồ sơ',
@@ -79,26 +79,30 @@ const Index = () => {
           )}
         </div>
 
+        {/* --- PHẦN SỬA LỖI NẰM Ở ĐÂY --- */}
         {/* Features Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
           {features.map((feature) => {
             const IconComponent = feature.icon;
             return (
-              <Card key={feature.title} className="hover:shadow-lg transition-shadow">
-                <CardHeader>
-                  <div className="flex items-center space-x-3">
-                    <div className="p-2 bg-primary/10 rounded-lg">
-                      <IconComponent className="h-6 w-6 text-primary" />
+              // BỌC CARD BẰNG THẺ LINK VÀ TRUYỀN `feature.path` VÀO `to`
+              <Link key={feature.title} to={feature.path} className="no-underline text-current">
+                <Card className="hover:shadow-lg transition-shadow h-full">
+                  <CardHeader>
+                    <div className="flex items-center space-x-3">
+                      <div className="p-2 bg-primary/10 rounded-lg">
+                        <IconComponent className="h-6 w-6 text-primary" />
+                      </div>
+                      <CardTitle className="text-lg">{feature.title}</CardTitle>
                     </div>
-                    <CardTitle className="text-lg">{feature.title}</CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <CardDescription className="text-gray-600">
-                    {feature.description}
-                  </CardDescription>
-                </CardContent>
-              </Card>
+                  </CardHeader>
+                  <CardContent>
+                    <CardDescription className="text-gray-600">
+                      {feature.description}
+                    </CardDescription>
+                  </CardContent>
+                </Card>
+              </Link>
             );
           })}
         </div>
