@@ -61,13 +61,16 @@ const App = () => (
                 </Layout>
               </ProtectedRoute>
             } />
-            <Route path="/chat" element={
+
+            {/* SỬA Ở ĐÂY: đổi path từ "/chat" thành "/chat-ai" để khớp với Link */}
+            <Route path="/chat-ai" element={
               <ProtectedRoute>
                 <Layout>
                   <ChatAI />
                 </Layout>
               </ProtectedRoute>
             } />
+            
             <Route path="/profile" element={
               <ProtectedRoute>
                 <Layout>
