@@ -11,12 +11,16 @@ export const Profile = () => {
   const [profileData, setProfileData] = useState({
     name: "Nguyễn Văn A",
     email: "nguyenvana@student.edu.vn",
-    studentId: "SV001234",
-    class: "CNTT-K65",
+    school: "Đại học Công nghệ",
     major: "Công nghệ thông tin",
     phone: "0123456789",
     address: "123 Đường ABC, Quận 1, TP.HCM",
     year: "3"
+  });
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmNewPassword: ""
   });
 
   const handleInputChange = (field: string, value: string) => {
@@ -26,6 +30,19 @@ export const Profile = () => {
   const handleSave = () => {
     // Handle save profile logic here
     console.log("Saving profile:", profileData);
+  };
+  const handleChangePassword = () => {
+    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmNewPassword) {
+      console.log("Vui lòng điền đầy đủ thông tin mật khẩu");
+      return;
+    }
+    if (passwordForm.newPassword !== passwordForm.confirmNewPassword) {
+      console.log("Mật khẩu mới và xác nhận không khớp");
+      return;
+    }
+    // Handle change password logic here
+    console.log("Changing password:", { current: "********", next: "********" });
+    setPasswordForm({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
   };
 
   return (
@@ -72,12 +89,11 @@ export const Profile = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="studentId">Mã sinh viên</Label>
+                  <Label htmlFor="school">Trường</Label>
                   <Input
-                    id="studentId"
-                    value={profileData.studentId}
-                    onChange={(e) => handleInputChange("studentId", e.target.value)}
-                    disabled
+                    id="school"
+                    value={profileData.school}
+                    onChange={(e) => handleInputChange("school", e.target.value)}
                   />
                 </div>
 
@@ -100,14 +116,7 @@ export const Profile = () => {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="class">Lớp</Label>
-                  <Input
-                    id="class"
-                    value={profileData.class}
-                    onChange={(e) => handleInputChange("class", e.target.value)}
-                  />
-                </div>
+                
 
                 <div className="space-y-2">
                   <Label htmlFor="major">Chuyên ngành</Label>
@@ -167,6 +176,50 @@ export const Profile = () => {
           </Card>
         </div>
       </div>
+      
+      {/* Change Password */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Đổi mật khẩu</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="space-y-2">
+              <Label htmlFor="currentPassword">Mật khẩu hiện tại</Label>
+              <Input
+                id="currentPassword"
+                type="password"
+                value={passwordForm.currentPassword}
+                onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
+                placeholder="Nhập mật khẩu hiện tại"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="newPassword">Mật khẩu mới</Label>
+              <Input
+                id="newPassword"
+                type="password"
+                value={passwordForm.newPassword}
+                onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                placeholder="Nhập mật khẩu mới"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirmNewPassword">Xác nhận mật khẩu mới</Label>
+              <Input
+                id="confirmNewPassword"
+                type="password"
+                value={passwordForm.confirmNewPassword}
+                onChange={(e) => setPasswordForm({ ...passwordForm, confirmNewPassword: e.target.value })}
+                placeholder="Nhập lại mật khẩu mới"
+              />
+            </div>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={handleChangePassword}>Cập nhật mật khẩu</Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

@@ -12,15 +12,73 @@ import { Label } from "@/components/ui/label";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useState } from "react";
-import { Plus, TrendingUp, TrendingDown, PieChart, Target, AlertCircle, DollarSign } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Plus, TrendingUp, TrendingDown, PieChart, Target, AlertCircle, DollarSign, Pencil } from "lucide-react";
+
+// --- Kiểu dữ liệu cho giao dịch ---
+interface Transaction {
+  id: number;
+  date: string;
+  description: string;
+  category: string;
+  amount: number;
+  type: "income" | "expense";
+}
+
+// --- Dữ liệu ban đầu (fallback) ---
+const initialTransactions: Transaction[] = [
+  { id: 1, date: "2024-01-15", description: "Cơm trưa", category: "Ăn uống", amount: -45000, type: "expense" },
+  { id: 2, date: "2024-01-14", description: "Học phí", category: "Học tập", amount: -850000, type: "expense" },
+  { id: 3, date: "2024-01-13", description: "Tiền từ nhà", category: "Hỗ trợ", amount: 2000000, type: "income" },
+  { id: 4, date: "2024-01-12", description: "Xem phim", category: "Giải trí", amount: -120000, type: "expense" },
+  { id: 5, date: "2024-01-11", description: "Mua sách", category: "Học tập", amount: -85000, type: "expense" },
+];
+
 
 export const Expenses = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [editBudgetOpen, setEditBudgetOpen] = useState(false);
+  
+  // --- State quản lý danh sách giao dịch, đọc từ localStorage ---
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    try {
+      const savedTransactions = localStorage.getItem("transactions");
+      return savedTransactions ? JSON.parse(savedTransactions) : initialTransactions;
+    } catch (error) {
+      console.error("Failed to parse transactions from localStorage", error);
+      return initialTransactions;
+    }
+  });
 
+  // --- State quản lý ngân sách tháng, đọc từ localStorage ---
+  const [monthlyBudget, setMonthlyBudget] = useState<number>(() => {
+    const saved = localStorage.getItem("monthlyBudget");
+    const parsed = saved ? Number(saved) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 3000000;
+  });
+
+  const [budgetInput, setBudgetInput] = useState<string>(String(monthlyBudget));
+
+  // --- States cho bộ lọc ---
+  const [filterType, setFilterType] = useState<"all" | "income" | "expense">("all");
+  const [filterCategory, setFilterCategory] = useState<string>("all"); // SỬA LỖI: Giá trị mặc định là "all"
+  const [searchQuery, setSearchQuery] = useState<string>("");
+
+  // --- Lưu dữ liệu vào localStorage mỗi khi có thay đổi ---
+  useEffect(() => {
+    localStorage.setItem("transactions", JSON.stringify(transactions));
+  }, [transactions]);
+
+  useEffect(() => {
+    localStorage.setItem("monthlyBudget", String(monthlyBudget));
+  }, [monthlyBudget]);
+
+  // --- Định nghĩa Schema cho Form ---
   const transactionFormSchema = z.object({
     description: z.string().min(1, "Mô tả là bắt buộc"),
-    amount: z.string().min(1, "Số tiền là bắt buộc"),
+    amount: z.string().refine(val => !isNaN(parseFloat(val)) && parseFloat(val) > 0, {
+      message: "Số tiền phải là một số lớn hơn 0",
+    }),
     category: z.string().min(1, "Danh mục là bắt buộc"),
     type: z.enum(["income", "expense"], {
       required_error: "Loại giao dịch là bắt buộc"
@@ -37,54 +95,116 @@ export const Expenses = () => {
     }
   });
 
+  const watchedType = form.watch("type");
+  
+  // Reset danh mục khi thay đổi loại giao dịch
+  useEffect(() => {
+    form.setValue("category", "");
+  }, [watchedType, form]);
+
+  // --- Xử lý khi submit form ---
   const onSubmit = (values: z.infer<typeof transactionFormSchema>) => {
-    console.log(values);
+    const numericAmount = parseFloat(values.amount);
+
+    // Chặn vượt ngân sách tháng đối với giao dịch chi tiêu
+    if (values.type === 'expense') {
+      const projected = totalSpentThisMonth + numericAmount;
+      if (monthlyBudget >= 0 && projected > monthlyBudget) {
+        alert(`Vượt giới hạn ngân sách tháng. Tổng chi dự kiến là ${projected.toLocaleString('vi-VN')} ₫ trong khi ngân sách là ${monthlyBudget.toLocaleString('vi-VN')} ₫.`);
+        return;
+      }
+    }
+
+    const newTransaction: Transaction = {
+      id: Date.now(),
+      date: new Date().toISOString().split('T')[0],
+      description: values.description,
+      category: values.category,
+      type: values.type,
+      amount: values.type === 'expense' ? -numericAmount : numericAmount,
+    };
+
+    setTransactions(prev => [newTransaction, ...prev]);
     setDialogOpen(false);
     form.reset();
   };
-  // Mock data
-  const transactions = [
-    { id: 1, date: "2024-01-15", description: "Cơm trưa", category: "Ăn uống", amount: -45000, type: "expense" },
-    { id: 2, date: "2024-01-14", description: "Học phí", category: "Học tập", amount: -850000, type: "expense" },
-    { id: 3, date: "2024-01-13", description: "Tiền từ nhà", category: "Hỗ trợ", amount: 2000000, type: "income" },
-    { id: 4, date: "2024-01-12", description: "Xem phim", category: "Giải trí", amount: -120000, type: "expense" },
-    { id: 5, date: "2024-01-11", description: "Mua sách", category: "Học tập", amount: -85000, type: "expense" },
-  ];
+  
+  // --- Các danh mục ---
+  const expenseCategories = ["Ăn uống", "Học tập", "Giải trí", "Giao thông", "Mua sắm", "Khác"] as const;
+  const incomeCategories = ["Hỗ trợ", "Học bổng", "Tiền lương", "Khác"] as const;
+  const categoryOptionsForType = watchedType === "income" ? incomeCategories : expenseCategories;
+  
+  // --- Tính toán động các số liệu từ state `transactions` ---
+  const { totalIncome, totalExpense, balance, totalSpentThisMonth, filteredTransactions, categorySpending } = useMemo(() => {
+    const income = transactions
+      .filter(t => t.type === "income")
+      .reduce((sum, t) => sum + t.amount, 0);
 
-  // Budget data
-  const monthlyBudget = 3000000; // 3 triệu VND
-  const budgets = {
-    "Ăn uống": { limit: 1200000, spent: 800000 },
-    "Học tập": { limit: 1000000, spent: 935000 },
-    "Giải trí": { limit: 500000, spent: 320000 },
-    "Khác": { limit: 300000, spent: 50000 }
+    const expense = transactions
+      .filter(t => t.type === "expense")
+      .reduce((sum, t) => sum + t.amount, 0);
+
+    const filtered = transactions.filter(t => {
+      if (filterType !== "all" && t.type !== filterType) return false;
+      // SỬA LỖI: Thêm điều kiện `filterCategory !== "all"`
+      if (filterCategory && filterCategory !== "all" && t.category !== filterCategory) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        const text = `${t.description} ${t.category}`.toLowerCase();
+        if (!text.includes(q)) return false;
+      }
+      return true;
+    });
+    
+    const spending = transactions // Tính toán trên tất cả giao dịch, không phải giao dịch đã lọc
+      .filter(t => t.type === 'expense')
+      .reduce((acc, curr) => {
+        acc[curr.category] = (acc[curr.category] || 0) + Math.abs(curr.amount);
+        return acc;
+      }, {} as Record<string, number>);
+
+    return {
+      totalIncome: income,
+      totalExpense: Math.abs(expense),
+      balance: income + expense,
+      totalSpentThisMonth: Math.abs(expense),
+      filteredTransactions: filtered,
+      categorySpending: spending
+    };
+  }, [transactions, filterType, filterCategory, searchQuery]);
+
+  const budgetUsagePercentage = monthlyBudget > 0 ? Math.round((totalSpentThisMonth / monthlyBudget) * 100) : 0;
+  
+  // Dữ liệu cho biểu đồ, tính toán động
+  const chartCategories = useMemo(() => {
+    if(totalSpentThisMonth === 0) return [];
+    
+    const colors = ["bg-primary", "bg-green-600", "bg-purple-500", "bg-orange-500", "bg-red-500"];
+    return Object.entries(categorySpending)
+      .sort(([, a], [, b]) => b - a)
+      .map(([name, amount], index) => ({
+        name,
+        amount,
+        color: colors[index % colors.length],
+        percentage: Math.round((amount / totalSpentThisMonth) * 100)
+      }));
+  }, [categorySpending, totalSpentThisMonth]);
+
+  // Xử lý lưu ngân sách
+  const handleSaveBudget = () => {
+    const next = Number(budgetInput);
+    if (Number.isFinite(next) && next >= 0) {
+      setMonthlyBudget(next);
+      setEditBudgetOpen(false);
+    } else {
+      alert("Vui lòng nhập một số hợp lệ cho ngân sách.");
+    }
   };
 
-  const totalIncome = transactions
-    .filter(t => t.type === "income")
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalExpense = Math.abs(transactions
-    .filter(t => t.type === "expense")
-    .reduce((sum, t) => sum + t.amount, 0));
-
-  const balance = totalIncome - totalExpense;
-
-  // Calculate total spent this month
-  const totalSpentThisMonth = Object.values(budgets).reduce((sum, budget) => sum + budget.spent, 0);
-  const budgetUsagePercentage = Math.round((totalSpentThisMonth / monthlyBudget) * 100);
-
-  // Category data for pie chart simulation
-  const categories = [
-    { name: "Ăn uống", amount: 800000, color: "bg-primary", percentage: 38 },
-    { name: "Học tập", amount: 935000, color: "bg-green-600", percentage: 45 },
-    { name: "Giải trí", amount: 320000, color: "bg-purple-500", percentage: 15 },
-    { name: "Khác", amount: 50000, color: "bg-orange-500", percentage: 2 },
-  ];
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
           <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
             <DollarSign className="h-5 w-5 text-primary" />
@@ -154,10 +274,10 @@ export const Expenses = () => {
                       <FormItem>
                         <FormLabel>Số tiền (VND)</FormLabel>
                         <FormControl>
-                          <Input 
-                            type="number" 
-                            placeholder="0" 
-                            {...field} 
+                          <Input
+                            type="number"
+                            placeholder="0"
+                            {...field}
                           />
                         </FormControl>
                         <FormMessage />
@@ -170,19 +290,16 @@ export const Expenses = () => {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Danh mục</FormLabel>
-                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <Select onValueChange={field.onChange} value={field.value}>
                           <FormControl>
                             <SelectTrigger>
-                              <SelectValue placeholder="Chọn danh mục" />
+                              <SelectValue placeholder={watchedType === 'income' ? 'Chọn danh mục thu' : 'Chọn danh mục chi'} />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="Ăn uống">Ăn uống</SelectItem>
-                            <SelectItem value="Học tập">Học tập</SelectItem>
-                            <SelectItem value="Giải trí">Giải trí</SelectItem>
-                            <SelectItem value="Giao thông">Giao thông</SelectItem>
-                            <SelectItem value="Hỗ trợ">Hỗ trợ</SelectItem>
-                            <SelectItem value="Khác">Khác</SelectItem>
+                            {categoryOptionsForType.map((c) => (
+                              <SelectItem key={c} value={c}>{c}</SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                         <FormMessage />
@@ -203,7 +320,7 @@ export const Expenses = () => {
       </div>
 
       {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Tổng thu</CardTitle>
@@ -235,7 +352,7 @@ export const Expenses = () => {
           </CardHeader>
           <CardContent>
             <div className={`text-2xl font-bold ${balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {balance >= 0 ? '+' : ''}{balance.toLocaleString("vi-VN")} ₫
+              {balance.toLocaleString("vi-VN")} ₫
             </div>
           </CardContent>
         </Card>
@@ -243,7 +360,39 @@ export const Expenses = () => {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Ngân sách tháng</CardTitle>
-            <Target className="h-4 w-4 text-primary" />
+            <div className="flex items-center">
+              <Target className="h-4 w-4 text-primary" />
+              <Dialog open={editBudgetOpen} onOpenChange={setEditBudgetOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 ml-2">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-[425px]">
+                  <DialogHeader>
+                    <DialogTitle>Chỉnh sửa ngân sách tháng</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="budget">Ngân sách (VND)</Label>
+                      <Input
+                        id="budget"
+                        type="number"
+                        value={budgetInput}
+                        onChange={(e) => setBudgetInput(e.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                    <div className="flex justify-end space-x-2">
+                      <Button variant="outline" type="button" onClick={() => setEditBudgetOpen(false)}>Hủy</Button>
+                      <Button type="button" onClick={handleSaveBudget}>
+                        Lưu
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-primary">
@@ -252,80 +401,115 @@ export const Expenses = () => {
             <div className="mt-2 space-y-1">
               <Progress value={budgetUsagePercentage} className="h-2" />
               <div className={`text-xs flex items-center ${budgetUsagePercentage > 80 ? 'text-red-600' : 'text-muted-foreground'}`}>
-                {budgetUsagePercentage > 80 && <AlertCircle className="h-3 w-3 mr-1" />}
+                {budgetUsagePercentage > 100 && <AlertCircle className="h-3 w-3 mr-1" />}
                 Đã dùng {budgetUsagePercentage}% ({totalSpentThisMonth.toLocaleString("vi-VN")} ₫)
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* Budget Overview */}
+      
+      {/* Category Charts */}
+      <div className="grid gap-6 lg:grid-cols-1">
         <Card>
-          <CardHeader>
-            <CardTitle>Ngân sách theo danh mục</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {Object.entries(budgets).map(([category, budget]) => {
-                const percentage = Math.round((budget.spent / budget.limit) * 100);
-                const isOverBudget = budget.spent > budget.limit;
-                return (
-                  <div key={category} className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="font-medium">{category}</span>
-                      <span className={`${isOverBudget ? 'text-red-600' : 'text-muted-foreground'}`}>
-                        {budget.spent.toLocaleString("vi-VN")} / {budget.limit.toLocaleString("vi-VN")} ₫
-                      </span>
+            <CardHeader>
+                <CardTitle>Phân tích chi tiêu</CardTitle>
+            </CardHeader>
+            <CardContent>
+                {chartCategories.length > 0 ? (
+                    <div className="space-y-4">
+                        {chartCategories.map(category => (
+                            <div key={category.name} className="space-y-2">
+                                <div className="flex justify-between text-sm">
+                                    <span>{category.name}</span>
+                                    <span className="font-medium">{category.percentage}%</span>
+                                </div>
+                                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                    <div
+                                        className={`h-full ${category.color} rounded-full`}
+                                        style={{ width: `${category.percentage}%` }}
+                                    />
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                    {category.amount.toLocaleString("vi-VN")} ₫
+                                </div>
+                            </div>
+                        ))}
                     </div>
-                    <Progress 
-                      value={Math.min(percentage, 100)} 
-                      className={`h-2 ${isOverBudget ? '[&>div]:bg-red-500' : ''}`}
-                    />
-                    <div className={`text-xs ${isOverBudget ? 'text-red-600' : 'text-muted-foreground'}`}>
-                      {percentage}% {isOverBudget && '(Vượt ngân sách!)'}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Category Chart */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Chi tiêu theo danh mục</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {categories.map(category => (
-                <div key={category.name} className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span>{category.name}</span>
-                    <span className="font-medium">{category.percentage}%</span>
-                  </div>
-                  <div className="h-2 bg-muted rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full ${category.color} rounded-full`}
-                      style={{ width: `${category.percentage}%` }}
-                    />
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {category.amount.toLocaleString("vi-VN")} ₫
-                  </div>
-                </div>
-              ))}
-            </div>
-          </CardContent>
+                ) : (
+                    <p className="text-sm text-muted-foreground">Chưa có dữ liệu chi tiêu để hiển thị.</p>
+                )}
+            </CardContent>
         </Card>
       </div>
+
+
+      {/* Filters */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <Label htmlFor="filterType">Loại giao dịch</Label>
+              <Select
+                value={filterType}
+                onValueChange={(v) => {
+                  setFilterType(v as any);
+                  setFilterCategory("all"); // Reset category filter
+                }}
+              >
+                <SelectTrigger id="filterType" className="mt-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tất cả</SelectItem>
+                  <SelectItem value="income">Thu nhập</SelectItem>
+                  <SelectItem value="expense">Chi tiêu</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="filterCategory">Danh mục</Label>
+              <Select
+                value={filterCategory}
+                onValueChange={setFilterCategory}
+              >
+                <SelectTrigger id="filterCategory" className="mt-1">
+                  <SelectValue placeholder="Tất cả danh mục" />
+                </SelectTrigger>
+                <SelectContent>
+                  {/* SỬA LỖI: value="all" */}
+                  <SelectItem value="all">Tất cả danh mục</SelectItem>
+                  {(filterType === "income"
+                    ? incomeCategories
+                    : filterType === "expense"
+                    ? expenseCategories
+                    : [...new Set([...incomeCategories, ...expenseCategories])]
+                  ).map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {c}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="search">Tìm kiếm</Label>
+              <Input
+                id="search"
+                className="mt-1"
+                placeholder="Nhập mô tả, danh mục..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Transaction Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Giao dịch gần đây</CardTitle>
+          <CardTitle>Lịch sử giao dịch</CardTitle>
         </CardHeader>
         <CardContent>
           <Table>
@@ -338,7 +522,7 @@ export const Expenses = () => {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {transactions.map(transaction => (
+              {filteredTransactions.length > 0 ? filteredTransactions.map(transaction => (
                 <TableRow key={transaction.id}>
                   <TableCell className="font-medium">
                     {new Date(transaction.date).toLocaleDateString("vi-VN")}
@@ -347,14 +531,16 @@ export const Expenses = () => {
                   <TableCell>
                     <Badge variant="outline">{transaction.category}</Badge>
                   </TableCell>
-                  <TableCell className={`text-right font-medium ${
-                    transaction.type === 'income' ? 'text-green-600' : 'text-red-600'
-                  }`}>
-                    {transaction.type === 'income' ? '+' : ''}
+                  <TableCell className={`text-right font-medium ${transaction.type === 'income' ? 'text-green-600' : ''
+                    }`}>
                     {transaction.amount.toLocaleString("vi-VN")} ₫
                   </TableCell>
                 </TableRow>
-              ))}
+              )) : (
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center">Không tìm thấy giao dịch nào.</TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </CardContent>
