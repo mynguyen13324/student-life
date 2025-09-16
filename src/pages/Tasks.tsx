@@ -17,6 +17,9 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Plus, Calendar, CheckSquare, CalendarIcon } from "lucide-react";
 
+
+
+
 // Dữ liệu ban đầu cho tasks
 const initialTasks = [
   {
@@ -56,14 +59,18 @@ const initialTasks = [
 export const Tasks = () => {
   const [filter, setFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const priorities = ["high", "medium", "low"] as const;
 
+  
+
+  
   // BƯỚC 1: Chuyển mảng tasks vào state để có thể cập nhật
   const [tasks, setTasks] = useState(initialTasks);
 
   const taskFormSchema = z.object({
     title: z.string().min(1, "Tiêu đề task là bắt buộc"),
     description: z.string().optional(),
-    subject: z.string().min(1, "Môn học là bắt buộc"),
+    category: z.string().min(1, "Danh mục là bắt buộc"),
     deadline: z.date({
       required_error: "Hạn chót là bắt buộc"
     }),
@@ -75,28 +82,27 @@ export const Tasks = () => {
     defaultValues: {
       title: "",
       description: "",
-      subject: "",
+      category: "học tập",
       priority: "medium"
     }
   });
 
   const onSubmit = (values: z.infer<typeof taskFormSchema>) => {
-    console.log(values);
-    // Logic để thêm task mới vào state `tasks` có thể được thêm ở đây
-    setDialogOpen(false);
-    form.reset();
+  const newTask = {
+    id: tasks.length + 1,
+    title: values.title,
+    description: values.description,
+    subject: values.category,
+    deadline: values.deadline.toISOString(),
+    status: "todo",
+    priority: values.priority
   };
+  setTasks(prev => [...prev, newTask]);
+  setDialogOpen(false);
+  form.reset();
+};
 
-  // BƯỚC 2: Tạo hàm xử lý khi nhấn checkbox
-  const handleToggleTaskStatus = (taskId: number) => {
-    setTasks(prevTasks =>
-      prevTasks.map(task =>
-        task.id === taskId
-          ? { ...task, status: task.status === 'done' ? 'todo' : 'done' }
-          : task
-      )
-    );
-  };
+
 
   const subjects = ["all", "Toán cao cấp", "Lập trình Web", "Cơ sở dữ liệu"];
   
@@ -131,7 +137,7 @@ export const Tasks = () => {
     }
   };
 
-  return (
+   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-3">
@@ -143,6 +149,8 @@ export const Tasks = () => {
             <p className="text-muted-foreground">Quản lý công việc và bài tập của bạn</p>
           </div>
         </div>
+
+        {/* Nút thêm task + Form dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button className="flex items-center space-x-2">
@@ -150,9 +158,124 @@ export const Tasks = () => {
               <span>Thêm task</span>
             </Button>
           </DialogTrigger>
-          {/* ... Nội dung Dialog giữ nguyên ... */}
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Thêm task mới</DialogTitle>
+            </DialogHeader>
+            <Form {...form}>
+              <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                <FormField
+                  control={form.control}
+                  name="title"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tiêu đề</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Nhập tiêu đề task" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Mô tả</FormLabel>
+                      <FormControl>
+                        <Textarea placeholder="Nhập mô tả" {...field} />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="priority"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Độ ưu tiên</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Chọn độ ưu tiên" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {priorities.map(p => (
+                            <SelectItem key={p} value={p}>
+                              {p === "high" ? "Cao" : p === "medium" ? "Trung bình" : "Thấp"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="category"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Danh mục</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Chọn danh mục" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {subjects.map(c => (
+                            <SelectItem key={c} value={c}>
+                              {c}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="deadline"
+                  render={({ field }) => (
+                    <FormItem className="flex flex-col">
+                      <FormLabel>Hạn chót</FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              "w-full justify-start text-left font-normal",
+                              !field.value && "text-muted-foreground"
+                            )}
+                          >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {field.value ? format(field.value, "dd/MM/yyyy") : "Chọn ngày"}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <CalendarComponent
+                            mode="single"
+                            selected={field.value}
+                            onSelect={field.onChange}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <Button type="submit" className="w-full">Lưu</Button>
+              </form>
+            </Form>
+          </DialogContent>
         </Dialog>
       </div>
+
+
+
 
       <div className="flex items-center space-x-4">
         <Select value={filter} onValueChange={setFilter}>
@@ -179,7 +302,15 @@ export const Tasks = () => {
                   {/* BƯỚC 3: Gắn hàm vào sự kiện onCheckedChange của Checkbox */}
                   <Checkbox 
                     checked={task.status === "done"} 
-                    onCheckedChange={() => handleToggleTaskStatus(task.id)}
+                    onCheckedChange={() => 
+                      setTasks(prevTasks =>
+                        prevTasks.map(t =>
+                          t.id === task.id
+                            ? { ...t, status: t.status === "done" ? "todo" : "done" }
+                            : t
+                        )
+                      )
+                    }
                     className="h-5 w-5"
                   />
                   
@@ -202,12 +333,18 @@ export const Tasks = () => {
                   <Badge className={getStatusColor(task.status)}>
                     {getStatusText(task.status)}
                   </Badge>
+
+   
                 </div>
               </div>
             </CardContent>
           </Card>
         ))}
       </div>
+
+
+
+      
     </div>
   );
 };
