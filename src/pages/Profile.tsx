@@ -107,16 +107,6 @@ export const Profile = () => {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="phone">Số điện thoại</Label>
-                  <Input
-                    id="phone"
-                    value={profileData.phone}
-                    onChange={(e) => handleInputChange("phone", e.target.value)}
-                  />
-                </div>
-
-                
 
                 <div className="space-y-2">
                   <Label htmlFor="major">Chuyên ngành</Label>
