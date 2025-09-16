@@ -4,6 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,7 +14,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useEffect, useMemo, useState } from "react";
-import { Plus, TrendingUp, TrendingDown, PieChart, Target, AlertCircle, DollarSign, Pencil } from "lucide-react";
+import { Plus, TrendingUp, TrendingDown, PieChart, Target, AlertCircle, DollarSign, Pencil, Trash2 } from "lucide-react";
 
 // --- Kiểu dữ liệu cho giao dịch ---
 interface Transaction {
@@ -63,6 +64,8 @@ export const Expenses = () => {
   const [filterType, setFilterType] = useState<"all" | "income" | "expense">("all");
   const [filterCategory, setFilterCategory] = useState<string>("all"); // SỬA LỖI: Giá trị mặc định là "all"
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   // --- Lưu dữ liệu vào localStorage mỗi khi có thay đổi ---
   useEffect(() => {
@@ -127,6 +130,59 @@ export const Expenses = () => {
     setTransactions(prev => [newTransaction, ...prev]);
     setDialogOpen(false);
     form.reset();
+  };
+
+  // --- Form chỉnh sửa giao dịch ---
+  const editForm = useForm<z.infer<typeof transactionFormSchema>>({
+    resolver: zodResolver(transactionFormSchema),
+    defaultValues: {
+      description: "",
+      amount: "",
+      category: "",
+      type: "expense"
+    }
+  });
+  const editWatchedType = editForm.watch("type");
+  useEffect(() => {
+    editForm.setValue("category", "");
+  }, [editWatchedType, editForm]);
+
+  const openEditDialog = (tx: Transaction) => {
+    setEditingTransaction(tx);
+    editForm.reset({
+      description: tx.description,
+      amount: String(Math.abs(tx.amount)),
+      category: tx.category,
+      type: tx.type
+    });
+    setEditDialogOpen(true);
+  };
+
+  const onEditSubmit = (values: z.infer<typeof transactionFormSchema>) => {
+    if (!editingTransaction) return;
+    const numericAmount = parseFloat(values.amount);
+
+    // Tính tổng chi dự kiến sau khi cập nhật
+    const currentSpent = totalSpentThisMonth;
+    const oldExpense = editingTransaction.type === 'expense' ? Math.abs(editingTransaction.amount) : 0;
+    const newExpense = values.type === 'expense' ? numericAmount : 0;
+    const projected = currentSpent - oldExpense + newExpense;
+    if (monthlyBudget >= 0 && projected > monthlyBudget) {
+      alert(`Vượt giới hạn ngân sách tháng. Tổng chi dự kiến là ${projected.toLocaleString('vi-VN')} ₫ trong khi ngân sách là ${monthlyBudget.toLocaleString('vi-VN')} ₫.`);
+      return;
+    }
+
+    const updated: Transaction = {
+      ...editingTransaction,
+      description: values.description,
+      category: values.category,
+      type: values.type,
+      amount: values.type === 'expense' ? -numericAmount : numericAmount,
+    };
+
+    setTransactions(prev => prev.map(t => t.id === editingTransaction.id ? updated : t));
+    setEditDialogOpen(false);
+    setEditingTransaction(null);
   };
   
   // --- Các danh mục ---
@@ -519,6 +575,7 @@ export const Expenses = () => {
                 <TableHead>Mô tả</TableHead>
                 <TableHead>Danh mục</TableHead>
                 <TableHead className="text-right">Số tiền</TableHead>
+                <TableHead className="text-right">Thao tác</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -535,16 +592,136 @@ export const Expenses = () => {
                     }`}>
                     {transaction.amount.toLocaleString("vi-VN")} ₫
                   </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openEditDialog(transaction)}>Sửa</Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="destructive" size="sm" className="gap-1">
+                            <Trash2 className="h-4 w-4" />
+                            Xóa
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Xóa giao dịch?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Thao tác này không thể hoàn tác. Giao dịch sẽ bị xóa khỏi lịch sử.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Hủy</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => setTransactions(prev => prev.filter(t => t.id !== transaction.id))}>Xóa</AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </TableCell>
                 </TableRow>
               )) : (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center">Không tìm thấy giao dịch nào.</TableCell>
+                  <TableCell colSpan={5} className="text-center">Không tìm thấy giao dịch nào.</TableCell>
                 </TableRow>
               )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
+
+      {/* Edit Transaction Dialog */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Chỉnh sửa giao dịch</DialogTitle>
+          </DialogHeader>
+          <Form {...editForm}>
+            <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
+              <FormField
+                control={editForm.control}
+                name="type"
+                render={({ field }) => (
+                  <FormItem className="space-y-3">
+                    <FormLabel>Loại giao dịch</FormLabel>
+                    <FormControl>
+                      <RadioGroup
+                        onValueChange={field.onChange}
+                        defaultValue={field.value}
+                        className="flex space-x-6"
+                      >
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="income" id="edit-income" />
+                          <Label htmlFor="edit-income" className="text-green-600">Thu nhập</Label>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <RadioGroupItem value="expense" id="edit-expense" />
+                          <Label htmlFor="edit-expense" className="text-red-600">Chi tiêu</Label>
+                        </div>
+                      </RadioGroup>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={editForm.control}
+                name="description"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Mô tả</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Nhập mô tả giao dịch" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <div className="grid grid-cols-2 gap-4">
+                <FormField
+                  control={editForm.control}
+                  name="amount"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Số tiền (VND)</FormLabel>
+                      <FormControl>
+                        <Input type="number" placeholder="0" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={editForm.control}
+                  name="category"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Danh mục</FormLabel>
+                      <Select onValueChange={field.onChange} value={field.value}>
+                        <FormControl>
+                          <SelectTrigger>
+                            <SelectValue placeholder={editWatchedType === 'income' ? 'Chọn danh mục thu' : 'Chọn danh mục chi'} />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          {(editWatchedType === 'income' ? incomeCategories : expenseCategories).map((c) => (
+                            <SelectItem key={c} value={c}>{c}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
+              <div className="flex justify-end space-x-2">
+                <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)}>
+                  Hủy
+                </Button>
+                <Button type="submit">Lưu thay đổi</Button>
+              </div>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

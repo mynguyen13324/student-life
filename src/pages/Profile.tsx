@@ -145,16 +145,6 @@ export const Profile = () => {
                   </Select>
                 </div>
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="address">Địa chỉ</Label>
-                <Input
-                  id="address"
-                  value={profileData.address}
-                  onChange={(e) => handleInputChange("address", e.target.value)}
-                />
-              </div>
-
               <div className="flex justify-end space-x-2">
                 <Button variant="outline">Hủy</Button>
                 <Button onClick={handleSave} className="flex items-center space-x-2">
