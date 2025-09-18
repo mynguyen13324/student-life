@@ -96,6 +96,13 @@ export const Schedule = () => {
   const [editingSubjectIdx, setEditingSubjectIdx] = useState<number | null>(null);
   const [editingExamIdx, setEditingExamIdx] = useState<number | null>(null);
 
+  // confirm delete state
+  const [confirm, setConfirm] = useState<{ type: "subject" | "exam" | null; idx: number | null; open: boolean }>({
+    type: null,
+    idx: null,
+    open: false,
+  });
+
   const SLOT_MIN = 30; // bước thời gian hiển thị
 
   // ===== State dữ liệu =====
@@ -249,17 +256,21 @@ export const Schedule = () => {
   const toggleCancelExam = (idx: number) => setExams((prev) => prev.map((e, i) => (i === idx ? { ...e, canceled: !e.canceled } : e)));
 
   // ===== Render helpers =====
-  const ActionButtons = ({ onEdit, onDelete, onCancel }: { onEdit: () => void; onDelete: () => void; onCancel: () => void }) => (
+  const ActionButtons = ({ onEdit, onDeleteOpen, onCancel }: { onEdit: () => void; onDeleteOpen: () => void; onCancel: () => void }) => (
     <div className="absolute right-1 top-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
       <button onClick={onEdit} className="p-1 rounded bg-white/80 shadow hover:bg-white" title="Cập nhật"><Pencil className="h-3.5 w-3.5" /></button>
-      <button onClick={onDelete} className="p-1 rounded bg-white/80 shadow hover:bg-white" title="Xóa"><Trash2 className="h-3.5 w-3.5" /></button>
+      <button onClick={onDeleteOpen} className="p-1 rounded bg-white/80 shadow hover:bg-white" title="Xóa"><Trash2 className="h-3.5 w-3.5" /></button>
       <button onClick={onCancel} className="p-1 rounded bg-white/80 shadow hover:bg-white" title="Hủy/Khôi phục"><XCircle className="h-3.5 w-3.5" /></button>
     </div>
   );
 
   const SubjectCard = (s: SubjectItem, idx: number) => (
     <div className={`relative group h-full rounded border p-2 ${colorMap[s.color] ?? colorMap.blue} ${s.canceled ? "opacity-60 line-through" : ""}`}>
-      <ActionButtons onEdit={() => startEditSubject(idx)} onDelete={() => deleteSubject(idx)} onCancel={() => toggleCancelSubject(idx)} />
+      <ActionButtons
+        onEdit={() => startEditSubject(idx)}
+        onDeleteOpen={() => setConfirm({ type: "subject", idx, open: true })}
+        onCancel={() => toggleCancelSubject(idx)}
+      />
       <div className="text-xs font-medium">{s.name}</div>
       <div className="text-xs opacity-80">{s.room}</div>
       <div className="text-xs opacity-70 mt-1">{s.startTime} - {s.endTime}</div>
@@ -269,7 +280,11 @@ export const Schedule = () => {
 
   const ExamCard = (e: ExamItem, idx: number) => (
     <div className={`relative group rounded border p-2 text-left ${colorMap[e.color] ?? colorMap.red} ${e.canceled ? "opacity-60 line-through" : ""}`}>
-      <ActionButtons onEdit={() => startEditExam(idx)} onDelete={() => deleteExam(idx)} onCancel={() => toggleCancelExam(idx)} />
+      <ActionButtons
+        onEdit={() => startEditExam(idx)}
+        onDeleteOpen={() => setConfirm({ type: "exam", idx, open: true })}
+        onCancel={() => toggleCancelExam(idx)}
+      />
       <div className="text-xs font-semibold">{e.subject}</div>
       <div className="text-xs">{e.startTime} - {e.endTime}</div>
       <div className="text-xs">{e.room}</div>
@@ -315,6 +330,44 @@ export const Schedule = () => {
         toMinutes(e.startTime) < slotEndMin
     );
     return idx >= 0 ? [exams[idx], idx] : null;
+  };
+
+  // confirm deletion handler
+  const handleConfirmDelete = () => {
+    if (!confirm.type || confirm.idx === null) {
+      setConfirm({ type: null, idx: null, open: false });
+      return;
+    }
+    if (confirm.type === "subject") {
+      deleteSubject(confirm.idx);
+    } else if (confirm.type === "exam") {
+      deleteExam(confirm.idx);
+    }
+    setConfirm({ type: null, idx: null, open: false });
+  };
+
+  const getConfirmTitle = () => {
+    if (confirm.type === "subject" && confirm.idx !== null) {
+      const s = subjects[confirm.idx];
+      return `Xóa môn học "${s?.name ?? ""}"?`;
+    }
+    if (confirm.type === "exam" && confirm.idx !== null) {
+      const e = exams[confirm.idx];
+      return `Xóa lịch thi "${e?.subject ?? ""}"?`;
+    }
+    return "Xóa mục này?";
+  };
+
+  const getConfirmBody = () => {
+    if (confirm.type === "subject" && confirm.idx !== null) {
+      const s = subjects[confirm.idx];
+      return `${s?.name ?? ""} (${s?.startTime ?? ""} - ${s?.endTime ?? ""}) sẽ bị xóa vĩnh viễn. Bạn có chắc?`;
+    }
+    if (confirm.type === "exam" && confirm.idx !== null) {
+      const e = exams[confirm.idx];
+      return `${e?.subject ?? ""} (${e?.startTime ?? ""} - ${e?.endTime ?? ""}) sẽ bị xóa vĩnh viễn. Bạn có chắc?`;
+    }
+    return "Mục sẽ bị xóa vĩnh viễn. Bạn có chắc?";
   };
 
   return (
@@ -530,6 +583,22 @@ export const Schedule = () => {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Confirm delete dialog */}
+      <Dialog open={confirm.open} onOpenChange={(open) => setConfirm((c) => ({ ...c, open }))}>
+        <DialogContent className="sm:max-w-[420px]">
+          <DialogHeader>
+            <DialogTitle>{getConfirmTitle()}</DialogTitle>
+          </DialogHeader>
+          <div className="pt-2 pb-4 text-sm text-muted-foreground">
+            {getConfirmBody()}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setConfirm({ type: null, idx: null, open: false })}>Hủy</Button>
+            <Button className="bg-red-600 hover:bg-red-700 text-white" onClick={handleConfirmDelete}>Xóa</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
