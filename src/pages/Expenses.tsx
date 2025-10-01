@@ -1,5 +1,4 @@
-"use client";
-
+// src/pages/Expenses.tsx
 import { useEffect, useMemo, useState } from "react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -13,7 +12,14 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogDescription, // ⬅️ thêm để tránh warning
+} from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
@@ -22,17 +28,9 @@ import {
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"; // giữ import cho đồng bộ mẫu (không dùng)
+// ❌ bỏ vì không dùng: import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Plus, TrendingUp, TrendingDown, PieChart, Target, AlertCircle, DollarSign, Pencil, Trash2 } from "lucide-react";
-
-// src/services/expenses.ts
-import { apiRequest } from "@/api/http";
-
-export const getExpenses = () => apiRequest("/expenses"); // tự gắn Bearer + auto refresh
-export const createExpense = (payload: any) =>
-  apiRequest("/expenses", { method: "POST", body: JSON.stringify(payload) });
-
 
 const categoryOptions: ExpenseCategory[] = [
   "FOOD",
@@ -64,12 +62,12 @@ export default function Expenses() {
   const [pageIndex, setPageIndex] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
 
-  // ---- filters (rút gọn thành 3 cột như bố cục mẫu) ----
+  // ---- filters ----
   const [fCategory, setFCategory] = useState<ExpenseCategory | "ALL">("ALL");
   const [fPayment, setFPayment] = useState<string | "ALL">("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
-  // vẫn giữ min/max/start/end ẩn để không thay đổi API search (gán từ searchQuery khi bấm Tìm)
+  // ẩn để không đổi API
   const [fMin, setFMin] = useState<string>("");
   const [fMax, setFMax] = useState<string>("");
   const [fStart, setFStart] = useState<string>("");
@@ -80,7 +78,7 @@ export default function Expenses() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editing, setEditing] = useState<UiExpense | null>(null);
 
-  // ---- monthly budget (UI-only, giống mẫu) ----
+  // ---- monthly budget ----
   const [monthlyBudget, setMonthlyBudget] = useState<number>(() => {
     const saved = localStorage.getItem("monthlyBudget");
     const parsed = saved ? Number(saved) : NaN;
@@ -220,12 +218,12 @@ export default function Expenses() {
     }
   };
 
-  // ---- computed (để hiện 4 Summary Cards & Chart giống mẫu) ----
+  // ---- computed ----
   const totalExpense = useMemo(
     () => items.reduce((s, i) => s + i.amount, 0),
     [items]
   );
-  const totalIncome = 0; // không có API thu, để 0 cho giống bố cục
+  const totalIncome = 0;
   const balance = totalIncome - totalExpense;
   const totalSpentThisMonth = totalExpense;
   const budgetUsagePercentage =
@@ -250,7 +248,7 @@ export default function Expenses() {
       });
   }, [categorySpending, totalSpentThisMonth]);
 
-  // ===================== UI (BỐ CỤC GIỐNG MẪU) =====================
+  // ===================== UI =====================
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -265,7 +263,7 @@ export default function Expenses() {
           </div>
         </div>
 
-        {/* Add dialog (giữ form theo API hiện có) */}
+        {/* Add dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button className="flex items-center space-x-2">
@@ -276,6 +274,7 @@ export default function Expenses() {
           <DialogContent className="sm:max-w-[480px]">
             <DialogHeader>
               <DialogTitle>Thêm chi tiêu mới</DialogTitle>
+              <DialogDescription>Nhập số tiền, ngày giờ, danh mục và mô tả (tuỳ chọn).</DialogDescription>
             </DialogHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -381,7 +380,7 @@ export default function Expenses() {
         </Dialog>
       </div>
 
-      {/* Summary Cards (4 ô giống mẫu) */}
+      {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -433,6 +432,7 @@ export default function Expenses() {
                 <DialogContent className="sm:max-w-[425px]">
                   <DialogHeader>
                     <DialogTitle>Chỉnh sửa ngân sách tháng</DialogTitle>
+                    <DialogDescription>Đặt mục tiêu chi tiêu trong tháng của bạn.</DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
                     <div className="space-y-2">
@@ -503,7 +503,7 @@ export default function Expenses() {
         </Card>
       </div>
 
-      {/* Filters (3 cột giống bố cục) */}
+      {/* Filters */}
       <Card>
         <CardContent className="pt-6">
           <div className="grid gap-3 md:grid-cols-3">
@@ -638,7 +638,10 @@ export default function Expenses() {
       {/* Edit dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
         <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader><DialogTitle>Chỉnh sửa chi tiêu</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Chỉnh sửa chi tiêu</DialogTitle>
+            <DialogDescription>Cập nhật thông tin giao dịch và lưu thay đổi.</DialogDescription>
+          </DialogHeader>
           <Form {...editForm}>
             <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
               <FormField

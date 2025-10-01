@@ -1,62 +1,65 @@
-// src/lib/http.ts
-// Wrapper fetch tự gắn Authorization + tự refresh 401 (serialize) rồi retry 1 lần
+// src/api/http.ts
+const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
-const API_BASE = "/api"; // Vite proxy: /api -> BE
+const LS = { AT: "accessToken", RT: "refreshToken", USER: "user" };
 
-const getAT = () => localStorage.getItem("accessToken");
-const getRT = () => localStorage.getItem("refreshToken");
-const setAT = (t: string) => localStorage.setItem("accessToken", t);
-const setRT = (t: string) => localStorage.setItem("refreshToken", t);
+const getAT = () => localStorage.getItem(LS.AT);
+const getRT = () => localStorage.getItem(LS.RT);
+const setAT = (t: string) => localStorage.setItem(LS.AT, t);
+const setRT = (t: string) => localStorage.setItem(LS.RT, t);
 
 export function logout(reason?: string) {
-  localStorage.removeItem("accessToken");
-  localStorage.removeItem("refreshToken");
-  localStorage.removeItem("user");
+  [LS.AT, LS.RT, LS.USER].forEach(k => localStorage.removeItem(k));
   if (reason) console.warn("[logout]", reason);
-  // Thêm logic chuyển hướng đến trang đăng nhập nếu cần (navigate('/login'))
+  window.location.assign("/login");
 }
 
-const SKIP_AUTH = [/\/users\/login$/, /\/users\/refresh$/];
+const SKIP_AUTH = [/\/users\/login$/, /\/users\/refresh$/, /\/users\/register$/];
 
 function buildUrl(input: string) {
-  return input.startsWith("http") ? input : `${API_BASE}${input}`;
+  if (input.startsWith("http")) return input;
+  const path = input.startsWith("/") ? input : `/${input}`;
+  return `${API_BASE}${path}`;
 }
-
 function shouldSkipAuth(url: string) {
   return SKIP_AUTH.some((re) => re.test(url));
 }
 
-// ---- refresh queue: tránh gọi nhiều lần song song
+// — refresh queue —
 let refreshPromise: Promise<void> | null = null;
 
 async function doRefresh(): Promise<void> {
   const rt = getRT();
-  if (!rt) throw new Error("No refresh token"); // LỖI ĐÃ ĐƯỢC SỬA: Bỏ từ khóa 'new' thứ hai
+  if (!rt) throw new Error("No refresh token");
 
   const res = await fetch(`${API_BASE}/users/refresh`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" }, // KHÔNG gửi Authorization
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refreshToken: rt }),
   });
-
   if (!res.ok) throw new Error("Refresh failed");
-  const data = (await res.json()) as { accessToken: string; refreshToken?: string };
 
+  const data = await res.json();
   if (!data?.accessToken) throw new Error("No access token from refresh");
   setAT(data.accessToken);
   if (data.refreshToken) setRT(data.refreshToken);
 }
 
+export async function ensureAuthOnBoot() {
+  const hasAT = !!getAT();
+  const hasRT = !!getRT();
+  if (!hasAT && hasRT) {
+    await doRefresh().catch(() => logout("refresh on boot failed"));
+  }
+}
+
 async function ensureRefreshedOnce() {
   if (!refreshPromise) {
-    refreshPromise = doRefresh().finally(() => {
-      refreshPromise = null;
-    });
+    refreshPromise = doRefresh().finally(() => { refreshPromise = null; });
   }
   return refreshPromise;
 }
 
-// ---- fetch có gắn Authorization (trừ các path SKIP_AUTH)
 export async function authFetch(input: string, init: RequestInit = {}) {
   const url = buildUrl(input);
   const headers = new Headers(init.headers || {});
@@ -65,65 +68,33 @@ export async function authFetch(input: string, init: RequestInit = {}) {
     if (at) headers.set("Authorization", `Bearer ${at}`);
   }
   if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
-
-  // Nếu BE dùng cookie session, bật dòng dưới:
-  // return fetch(url, { ...init, headers, credentials: "include" });
-
   return fetch(url, { ...init, headers });
 }
 
-// ---- API helper: auto refresh 401 và retry đúng 1 lần
 export async function apiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const exec = async () => {
     const res = await authFetch(path, init);
     const text = await res.text();
-    // Bắt lỗi JSON.parse khi body rỗng hoặc không phải JSON (ví dụ: 204 No Content)
-    let json = null;
-    try {
-        json = text ? JSON.parse(text) : null;
-    } catch (e) {
-        // Bỏ qua lỗi parse nếu text rỗng hoặc không phải json
-        if (text) console.error("Lỗi phân tích JSON:", e, "Text:", text);
-    }
+    let json: any = null;
+    try { json = text ? JSON.parse(text) : null; } catch {}
     return { res, json };
   };
 
-  try {
-    let { res, json } = await exec();
+  let { res, json } = await exec();
 
-    if (res.status === 401 && !shouldSkipAuth(buildUrl(path))) {
-      // chỉ refresh khi không phải login/refresh
-      try {
-        await ensureRefreshedOnce();
-      } catch {
-        logout("Refresh failed");
-        throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
-      }
-      // retry sau khi refresh
+  if (res.status === 401 && !shouldSkipAuth(buildUrl(path))) {
+    try {
+      await ensureRefreshedOnce();
       ({ res, json } = await exec());
+    } catch {
+      logout("refresh failed");
+      throw new Error("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.");
     }
-
-    if (!res.ok) {
-      const msg = json?.message || json?.error || `HTTP ${res.status}`;
-      throw new Error(msg);
-    }
-    if (json && "success" in json && json.success === false) {
-      throw new Error(json.message || "Request failed");
-    }
-    return (json?.data ?? json) as T;
-  } catch (e: any) {
-    // network / parse error
-    if (e?.name === "TypeError" && e?.message?.includes("Failed to fetch")) {
-      throw new Error("Không thể kết nối máy chủ. Vui lòng kiểm tra mạng hoặc API_BASE.");
-    }
-    throw e;
   }
-}
 
-// Tiện ích ngắn gọn
-export async function getJSON<T>(url: string): Promise<T> {
-  return apiRequest<T>(url);
-}
-export async function postJSON<T>(url: string, body: unknown): Promise<T> {
-  return apiRequest<T>(url, { method: "POST", body: JSON.stringify(body) });
+  if (!res.ok) {
+    const msg = json?.message || json?.error || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+  return (json?.data ?? json) as T;
 }

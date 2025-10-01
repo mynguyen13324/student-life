@@ -1,4 +1,6 @@
+// src/pages/Login.tsx
 import { useState } from 'react';
+import type { InputHTMLAttributes, ReactNode } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -6,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Eye, EyeOff, User, Mail, Lock } from 'lucide-react';
-import { apiRequest } from '@/api/http'; // ⬅️ dùng wrapper chung
+import { apiRequest } from '@/api/http'; // wrapper: tự gắn Bearer + auto refresh 401
 
 // ===========================================
 // ICONINPUT COMPONENT
@@ -18,8 +20,8 @@ const IconInput = (props: {
   placeholder?: string;
   value: string;
   onChange: (val: string) => void;
-  icon: React.ReactNode;
-  inputProps?: React.InputHTMLAttributes<HTMLInputElement>;
+  icon: ReactNode;
+  inputProps?: InputHTMLAttributes<HTMLInputElement>;
 }) => (
   <div>
     {props.label && <Label htmlFor={props.id}>{props.label}</Label>}
@@ -42,7 +44,8 @@ const IconInput = (props: {
 
 // ===========================================
 // TYPE DEFINITIONS
-// /users/login -> ResponseDTO{ data: { userDTO, token } }
+// /users/login -> ResponseDTO{ data: { userDTO, token } }  (cũ)
+// hoặc { accessToken, refreshToken, userDTO } (mới, nếu đã nâng cấp BE)
 // /users/refresh -> { accessToken, refreshToken }
 // ===========================================
 type UserDTO = {
@@ -51,10 +54,9 @@ type UserDTO = {
   email?: string;
 };
 
-type LoginRes = {
-  token: string;      // refresh token từ BE
-  userDTO?: UserDTO;
-};
+type LoginRes =
+  | { token: string; userDTO?: UserDTO } // BE cũ: chỉ trả refreshToken ở field "token"
+  | { refreshToken: string; accessToken?: string; userDTO?: UserDTO }; // BE mới
 
 type RefreshRes = {
   accessToken: string;
@@ -86,7 +88,13 @@ const Login = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setInfo('');
     setIsLoading(true);
+
+    // sau khi lưu token xong:
+    const from = (history.state && (history.state as any)?.usr?.from?.pathname) || "/";
+    navigate(from, { replace: true });
+
 
     try {
       const body = {
@@ -95,27 +103,47 @@ const Login = () => {
       };
       if (!body.userName || !body.password) throw new Error('Vui lòng nhập username và mật khẩu');
 
-      // 1) LOGIN => lấy refresh token + userDTO
+      // 1) LOGIN => lấy refresh token (+ có thể có access token nếu BE đã nâng cấp)
       const loginData = await apiRequest<LoginRes>('/users/login', {
         method: 'POST',
         body: JSON.stringify(body),
       });
-      if (!loginData?.token) throw new Error('Server không trả về refresh token');
 
-      // 2) REFRESH => đổi refresh token lấy access token
-      const refreshData = await apiRequest<RefreshRes>('/users/refresh', {
-        method: 'POST',
-        body: JSON.stringify({ refreshToken: loginData.token }),
-      });
-      if (!refreshData?.accessToken) throw new Error('Không nhận được accessToken từ /refresh');
+      // Lấy refreshToken từ "token" (cũ) hoặc "refreshToken" (mới)
+      const refreshToken =
+        ('token' in loginData && loginData.token) ||
+        ('refreshToken' in loginData && loginData.refreshToken);
+      if (!refreshToken) throw new Error('Server không trả về refresh token');
+
+      // Nếu login đã trả accessToken thì dùng luôn; nếu không → gọi /users/refresh để đổi
+      let accessToken =
+        'accessToken' in loginData && loginData.accessToken ? loginData.accessToken : '';
+
+      if (!accessToken) {
+        const refreshData = await apiRequest<RefreshRes>('/users/refresh', {
+          method: 'POST',
+          body: JSON.stringify({ refreshToken }),
+        });
+        accessToken = refreshData.accessToken;
+        // BE trả lại refreshToken (thường giống cũ) — ghi đè để đồng bộ
+        localStorage.setItem('refreshToken', refreshData.refreshToken);
+      } else {
+        // đồng bộ RT nếu BE mới có trả lại
+        if ('refreshToken' in loginData && loginData.refreshToken) {
+          localStorage.setItem('refreshToken', loginData.refreshToken);
+        } else {
+          localStorage.setItem('refreshToken', refreshToken);
+        }
+      }
 
       // 3) Lưu trữ token + user
-      localStorage.setItem('accessToken', refreshData.accessToken);
-      localStorage.setItem('refreshToken', refreshData.refreshToken || loginData.token);
-      if (loginData.userDTO) localStorage.setItem('user', JSON.stringify(loginData.userDTO));
+      localStorage.setItem('accessToken', accessToken);
+      if ('userDTO' in loginData && loginData.userDTO) {
+        localStorage.setItem('user', JSON.stringify(loginData.userDTO));
+      }
 
       setInfo('Đăng nhập thành công! Đang chuyển hướng...');
-      setTimeout(() => navigate('/'), 400);
+      setTimeout(() => navigate('/', { replace: true }), 400);
     } catch (err: any) {
       console.error('❌ Lỗi đăng nhập:', err);
       setError(err?.message || 'Có lỗi xảy ra, vui lòng thử lại');
@@ -133,7 +161,7 @@ const Login = () => {
     try {
       if (forgotStep === 1) {
         if (!forgotEmail) return setError('Vui lòng nhập email');
-        const code = '123456';
+        const code = '123456'; // mock
         setSentCode(code);
         setInfo('Mã xác minh đã được gửi tới email của bạn.');
         setForgotStep(2);
@@ -212,7 +240,7 @@ const Login = () => {
                   id="userName"
                   label="Tên đăng nhập"
                   type="text"
-                  placeholder="Nhập tên đăng nhập"
+                  placeholder="Nhập Username"
                   value={userName}
                   onChange={setUserName}
                   icon={<User className="h-4 w-4" />}

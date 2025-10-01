@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { apiRequest } from '@/api/http';
 import {
   Loader2,
   Eye,
@@ -19,7 +20,7 @@ import {
 
 type FieldErrors = Record<string, string>;
 
-type FormData = {
+type RegisterFormData = {
   userName: string;
   email: string;
   password: string;
@@ -28,9 +29,6 @@ type FormData = {
   major: string;
   year: string;
 };
-
-// Lấy base URL từ env, fallback về /api để đi qua Vite proxy trong dev
-const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 // Tailwind classes để mô phỏng shadcn/ui <Input>
 const inputBaseClasses =
@@ -49,7 +47,7 @@ export default function Register() {
     };
   }, []);
 
-  const [formData, setFormData] = useState<FormData>({
+  const [formData, setFormData] = useState<RegisterFormData>({
     userName: '',
     email: '',
     password: '',
@@ -70,7 +68,7 @@ export default function Register() {
 
   // Handler factory: KHÔNG dựa vào e.currentTarget.name → tránh bug pooling/name mismatch
   const handleChange =
-    <K extends keyof FormData>(key: K) =>
+    <K extends keyof RegisterFormData>(key: K) =>
     (e: React.ChangeEvent<HTMLInputElement>) => {
       if (isComposing) return; // IME: đang composition thì chưa cập nhật
       const value = e.target.value;
@@ -80,7 +78,7 @@ export default function Register() {
     };
 
   const handleSelect =
-    <K extends keyof FormData>(key: K) =>
+    <K extends keyof RegisterFormData>(key: K) =>
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       const value = e.target.value;
       setFormData((prev) => ({ ...prev, [key]: value }));
@@ -115,30 +113,26 @@ export default function Register() {
     setIsLoading(true);
     try {
       // BE yêu cầu password == rePassword
-      const res = await fetch(`${API_BASE}/users/register`, {
+      const payload = {
+        userName: formData.userName,
+        email: formData.email,
+        password: formData.password,
+        rePassword: formData.confirmPassword,
+        // university/major/year BE hiện không dùng trong registerUser()
+      };
+
+      // Dùng wrapper apiRequest: tự baseURL + JSON + lỗi
+      const user = await apiRequest<any>('/users/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userName: formData.userName,
-          email: formData.email,
-          password: formData.password,
-          rePassword: formData.confirmPassword,
-          // university/major/year BE đang không dùng trong registerUser()
-        }),
+        body: JSON.stringify(payload),
       });
 
-      const data = await res.json().catch(() => null);
-
-      if (res.ok) {
-        setSuccess(true);
-        if (data?.data) localStorage.setItem('user', JSON.stringify(data.data));
-        setTimeout(() => navigate('/login'), 1200);
-      } else {
-        setError(data?.message || 'Đăng ký thất bại — vui lòng thử lại');
-      }
-    } catch (err) {
+      setSuccess(true);
+      if (user) localStorage.setItem('user', JSON.stringify(user));
+      setTimeout(() => navigate('/login'), 1200);
+    } catch (err: any) {
       console.error('Register error:', err);
-      setError('Không thể kết nối server. Vui lòng thử lại sau.');
+      setError(err?.message || 'Đăng ký thất bại — vui lòng thử lại');
     } finally {
       setIsLoading(false);
     }
@@ -163,7 +157,7 @@ export default function Register() {
   // IconInput có IME guard tích hợp
   const IconInput = (props: {
     id: string;
-    name: keyof FormData; // chỉ để gắn attribute/autoComplete
+    name: keyof RegisterFormData; // chỉ để gắn attribute/autoComplete
     type?: string;
     placeholder?: string;
     value: string;
@@ -242,7 +236,7 @@ export default function Register() {
                   <IconInput
                     id="userName"
                     name="userName"
-                    placeholder="Tên đăng nhập"
+                    placeholder="Username"
                     value={formData.userName}
                     onChange={handleChange('userName')}
                     disabled={isLoading}

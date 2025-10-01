@@ -70,6 +70,11 @@ const App = () => (
                 </Layout>
               </ProtectedRoute>
             } />
+
+             {/* ví dụ trong App.tsx
+ <Route path="/" element={
+ <ProtectedRoute><Dashboard /></ProtectedRoute>
+ } /> */}
             
             <Route path="/profile" element={
               <ProtectedRoute>
