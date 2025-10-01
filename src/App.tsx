@@ -10,7 +10,7 @@ import Index from "./pages/Index";
 import { Dashboard } from "./pages/Dashboard";
 import { Schedule } from "./pages/Schedule";
 import { Tasks } from "./pages/Tasks";
-import { Expenses } from "./pages/Expenses";
+import Expenses from "./pages/Expenses";
 import { ChatAI } from "./pages/ChatAI";
 import { Profile } from "./pages/Profile";
 import Login from "./pages/Login";

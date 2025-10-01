@@ -6,52 +6,10 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, Eye, EyeOff, User, Mail, Lock } from 'lucide-react';
-
-export function authFetch(input: RequestInfo, init: RequestInit = {}) {
-  const accessToken = localStorage.getItem('accessToken');
-  return fetch(input, {
-    ...init,
-    headers: { ...(init.headers || {}), Authorization: accessToken ? `Bearer ${accessToken}` : '' },
-  });
-}
+import { apiRequest } from '@/api/http'; // ⬅️ dùng wrapper chung
 
 // ===========================================
-// API HELPER FUNCTION - CÓ DEBUG
-// ===========================================
-async function apiRequest<T>(path: string, init: RequestInit = {}) {
-  const headers = new Headers(init.headers);
-  if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
-
-  console.log('🚀 API Request:', path, init.method, init.body);
-
-  const res = await fetch(`/api${path}`, { ...init, headers });
-  const text = await res.text();
-
-  console.log('📥 API Response Status:', res.status, res.statusText);
-  console.log('📥 API Response Text:', text);
-
-  const json = text ? JSON.parse(text) : null;
-
-  if (!res.ok) {
-    const msg = json?.message || json?.error || `HTTP ${res.status}`;
-    console.error('❌ API Error:', msg);
-    throw new Error(msg);
-  }
-
-  // Nếu backend có field success=false
-  if (json && json.hasOwnProperty('success') && json.success === false) {
-    console.error('❌ Request failed:', json.message);
-    throw new Error(json.message || 'Request failed');
-  }
-
-  console.log('✅ API Success:', json);
-
-  // Trả về data từ ResponseDTO hoặc toàn bộ json
-  return (json?.data ?? json) as T;
-}
-
-// ===========================================
-// ICONINPUT COMPONENT - DI CHUYỂN RA NGOÀI
+// ICONINPUT COMPONENT
 // ===========================================
 const IconInput = (props: {
   id: string;
@@ -83,9 +41,9 @@ const IconInput = (props: {
 );
 
 // ===========================================
-// TYPE DEFINITIONS (khớp BE hiện tại)
-// /login trả về ResponseDTO{ data: { userDTO, token } }
-// /refresh trả về { accessToken, refreshToken }
+// TYPE DEFINITIONS
+// /users/login -> ResponseDTO{ data: { userDTO, token } }
+// /users/refresh -> { accessToken, refreshToken }
 // ===========================================
 type UserDTO = {
   id: string;
@@ -107,14 +65,13 @@ type RefreshRes = {
 // MAIN LOGIN COMPONENT
 // ===========================================
 const Login = () => {
-  // Login form states
-  const [userName, setUserName] = useState(''); // 🔁 đổi từ email -> userName
+  const [userName, setUserName] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Forgot password states (mock)
+  // Forgot password (mock)
   const [isForgot, setIsForgot] = useState(false);
   const [forgotStep, setForgotStep] = useState<1 | 2 | 3>(1);
   const [forgotEmail, setForgotEmail] = useState('');
@@ -126,9 +83,6 @@ const Login = () => {
 
   const navigate = useNavigate();
 
-  // ===========================================
-  // HANDLE LOGIN SUBMIT - GỌI /login -> /refresh
-  // ===========================================
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -139,19 +93,13 @@ const Login = () => {
         userName: userName.trim(),
         password: password.trim(),
       };
+      if (!body.userName || !body.password) throw new Error('Vui lòng nhập username và mật khẩu');
 
-      if (!body.userName || !body.password) {
-        throw new Error('Vui lòng nhập username và mật khẩu');
-      }
-
-      console.log('🔐 Bắt đầu đăng nhập với:', body);
-
-      // 1) LOGIN => nhận data.token (refresh token) & userDTO
+      // 1) LOGIN => lấy refresh token + userDTO
       const loginData = await apiRequest<LoginRes>('/users/login', {
         method: 'POST',
         body: JSON.stringify(body),
       });
-
       if (!loginData?.token) throw new Error('Server không trả về refresh token');
 
       // 2) REFRESH => đổi refresh token lấy access token
@@ -159,18 +107,12 @@ const Login = () => {
         method: 'POST',
         body: JSON.stringify({ refreshToken: loginData.token }),
       });
-
       if (!refreshData?.accessToken) throw new Error('Không nhận được accessToken từ /refresh');
 
       // 3) Lưu trữ token + user
       localStorage.setItem('accessToken', refreshData.accessToken);
       localStorage.setItem('refreshToken', refreshData.refreshToken || loginData.token);
       if (loginData.userDTO) localStorage.setItem('user', JSON.stringify(loginData.userDTO));
-
-      console.log('💾 Tokens saved:', {
-        accessToken: localStorage.getItem('accessToken') ? '✅' : '❌',
-        refreshToken: localStorage.getItem('refreshToken') ? '✅' : '❌',
-      });
 
       setInfo('Đăng nhập thành công! Đang chuyển hướng...');
       setTimeout(() => navigate('/'), 400);
@@ -182,9 +124,6 @@ const Login = () => {
     }
   };
 
-  // ===========================================
-  // HANDLE FORGOT PASSWORD (mock)
-  // ===========================================
   const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -222,14 +161,11 @@ const Login = () => {
     }
   };
 
-  // ===========================================
-  // RENDER COMPONENT
-  // ===========================================
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 to-emerald-100 p-6">
       <Card className="w-full max-w-3xl shadow-xl rounded-2xl overflow-hidden">
         <div className="grid grid-cols-1 md:grid-cols-2">
-          {/* Left side - Branding */}
+          {/* Left */}
           <div className="hidden md:flex flex-col items-start justify-center p-10 bg-gradient-to-b from-emerald-600 to-emerald-700 text-white space-y-6">
             <div className="flex items-center gap-3">
               <img
@@ -247,37 +183,31 @@ const Login = () => {
             </p>
           </div>
 
-          {/* Right side - Form */}
+          {/* Right - Form */}
           <CardContent className="p-8">
             <CardHeader className="p-0 mb-4">
               <CardTitle className="text-2xl font-semibold">
                 {isForgot ? 'Quên mật khẩu' : 'Đăng nhập'}
               </CardTitle>
               <CardDescription>
-                {isForgot
-                  ? 'Làm theo các bước để khôi phục mật khẩu'
-                  : 'Nhập thông tin để truy cập vào tài khoản của bạn'}
+                {isForgot ? 'Làm theo các bước để khôi phục mật khẩu' : 'Nhập thông tin để truy cập vào tài khoản của bạn'}
               </CardDescription>
             </CardHeader>
 
-            {/* Success message */}
             {info && (
               <Alert className="mb-4">
                 <AlertDescription>{info}</AlertDescription>
               </Alert>
             )}
 
-            {/* Error message */}
             {error && (
               <Alert variant="destructive" className="mb-4">
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
 
-            {/* LOGIN FORM */}
             {!isForgot ? (
               <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Username field */}
                 <IconInput
                   id="userName"
                   label="Tên đăng nhập"
@@ -286,14 +216,9 @@ const Login = () => {
                   value={userName}
                   onChange={setUserName}
                   icon={<User className="h-4 w-4" />}
-                  inputProps={{
-                    required: true,
-                    disabled: isLoading,
-                    autoComplete: 'username',
-                  }}
+                  inputProps={{ required: true, disabled: isLoading, autoComplete: 'username' }}
                 />
 
-                {/* Password field */}
                 <div>
                   <div className="flex items-center justify-between">
                     <Label htmlFor="password">Mật khẩu</Label>
@@ -340,7 +265,6 @@ const Login = () => {
                   </div>
                 </div>
 
-                {/* Submit button */}
                 <Button type="submit" className="w-full" disabled={isLoading}>
                   {isLoading ? (
                     <>
@@ -352,7 +276,6 @@ const Login = () => {
                   )}
                 </Button>
 
-                {/* Register link */}
                 <div className="mt-6 text-center text-sm">
                   <span className="text-muted-foreground">Chưa có tài khoản? </span>
                   <Link to="/register" className="text-emerald-700 hover:underline font-medium">
@@ -361,9 +284,7 @@ const Login = () => {
                 </div>
               </form>
             ) : (
-              /* FORGOT PASSWORD FORM (mock) */
               <form onSubmit={handleForgotSubmit} className="space-y-4">
-                {/* Step 1: Email input */}
                 {forgotStep === 1 && (
                   <IconInput
                     id="forgotEmail"
@@ -373,15 +294,10 @@ const Login = () => {
                     value={forgotEmail}
                     onChange={setForgotEmail}
                     icon={<Mail className="h-4 w-4" />}
-                    inputProps={{
-                      required: true,
-                      disabled: isLoading,
-                      autoComplete: 'email',
-                    }}
+                    inputProps={{ required: true, disabled: isLoading, autoComplete: 'email' }}
                   />
                 )}
 
-                {/* Step 2: Verification code */}
                 {forgotStep === 2 && (
                   <IconInput
                     id="verificationCode"
@@ -391,14 +307,10 @@ const Login = () => {
                     value={inputCode}
                     onChange={setInputCode}
                     icon={<User className="h-4 w-4" />}
-                    inputProps={{
-                      disabled: isLoading,
-                      maxLength: 6,
-                    }}
+                    inputProps={{ disabled: isLoading, maxLength: 6 }}
                   />
                 )}
 
-                {/* Step 3: New password */}
                 {forgotStep === 3 && (
                   <>
                     <div>
@@ -429,7 +341,6 @@ const Login = () => {
                   </>
                 )}
 
-                {/* Action buttons */}
                 <div className="flex items-center justify-between pt-2">
                   <button
                     type="button"
@@ -468,7 +379,6 @@ const Login = () => {
               </form>
             )}
 
-            {/* Debug info (chỉ hiển thị trong development) */}
             {process.env.NODE_ENV === 'development' && (
               <div className="mt-6 p-3 bg-gray-100 rounded-lg text-xs text-gray-600">
                 <strong>Debug:</strong> URL: {window.location.pathname} | AccessToken:{' '}
