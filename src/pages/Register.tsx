@@ -1,8 +1,7 @@
+// src/pages/Register.tsx
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -18,56 +17,87 @@ import {
   Lock
 } from 'lucide-react';
 
-const Register = () => {
-  // thêm useEffect để chèn favicon vào head khi component mount
+type FieldErrors = Record<string, string>;
+
+type FormData = {
+  userName: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+  university: string;
+  major: string;
+  year: string;
+};
+
+// Lấy base URL từ env, fallback về /api để đi qua Vite proxy trong dev
+const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
+
+// Tailwind classes để mô phỏng shadcn/ui <Input>
+const inputBaseClasses =
+  "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
+
+export default function Register() {
+  // Favicon (Vite: để /public/graduation-cap.svg)
   useEffect(() => {
     const link = document.createElement('link');
     link.rel = 'icon';
-    link.href = 'public/graduation-cap.svg';
-    link.type = 'image/png';
+    link.href = '/graduation-cap.svg';
+    link.type = 'image/svg+xml';
     document.head.appendChild(link);
-
     return () => {
       document.head.removeChild(link);
     };
   }, []);
 
-  const [formData, setFormData] = useState({
-    name: '',
+  const [formData, setFormData] = useState<FormData>({
+    userName: '',
     email: '',
     password: '',
     confirmPassword: '',
     university: '',
     major: '',
-    year: ''
+    year: '',
   });
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isComposing, setIsComposing] = useState(false); // IME guard
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  const { register } = useAuth();
   const navigate = useNavigate();
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-    setFieldErrors(prev => ({ ...prev, [name]: '' }));
-    setError('');
-  };
+  // Handler factory: KHÔNG dựa vào e.currentTarget.name → tránh bug pooling/name mismatch
+  const handleChange =
+    <K extends keyof FormData>(key: K) =>
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (isComposing) return; // IME: đang composition thì chưa cập nhật
+      const value = e.target.value;
+      setFormData((prev) => ({ ...prev, [key]: value }));
+      setFieldErrors((prev) => ({ ...prev, [key]: '' }));
+      setError('');
+    };
+
+  const handleSelect =
+    <K extends keyof FormData>(key: K) =>
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const value = e.target.value;
+      setFormData((prev) => ({ ...prev, [key]: value }));
+      setFieldErrors((prev) => ({ ...prev, [key]: '' }));
+      setError('');
+    };
 
   const validateForm = () => {
-    const errors: Record<string, string> = {};
-    if (!formData.name.trim()) errors.name = 'Vui lòng nhập họ tên';
+    const errors: FieldErrors = {};
+    if (!formData.userName.trim()) errors.userName = 'Vui lòng nhập Username';
     if (!formData.email.trim()) errors.email = 'Vui lòng nhập email';
     else if (!/\S+@\S+\.\S+/.test(formData.email)) errors.email = 'Email không hợp lệ';
     if (formData.password.length < 6) errors.password = 'Mật khẩu phải >= 6 ký tự';
     if (formData.password !== formData.confirmPassword) errors.confirmPassword = 'Mật khẩu xác nhận không khớp';
     if (!formData.university.trim()) errors.university = 'Vui lòng nhập trường đại học';
     if (!formData.major.trim()) errors.major = 'Vui lòng nhập chuyên ngành';
-    if (!/^[1-8]$/.test(formData.year)) errors.year = 'Chọn năm học hợp lệ (1–5)';
+    if (!/^[1-5]$/.test(formData.year)) errors.year = 'Chọn năm học hợp lệ (1–5)';
 
     setFieldErrors(errors);
     if (Object.keys(errors).length) {
@@ -84,16 +114,31 @@ const Register = () => {
 
     setIsLoading(true);
     try {
-      // Gửi object; điều chỉnh theo signature của register trong AuthContext nếu cần
-      const ok = await register(formData.name, formData.email, formData.password);
-      if (ok) {
+      // BE yêu cầu password == rePassword
+      const res = await fetch(`${API_BASE}/users/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userName: formData.userName,
+          email: formData.email,
+          password: formData.password,
+          rePassword: formData.confirmPassword,
+          // university/major/year BE đang không dùng trong registerUser()
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (res.ok) {
         setSuccess(true);
-        setTimeout(() => navigate('/'), 1500);
+        if (data?.data) localStorage.setItem('user', JSON.stringify(data.data));
+        setTimeout(() => navigate('/login'), 1200);
       } else {
-        setError('Đăng ký thất bại — vui lòng thử lại');
+        setError(data?.message || 'Đăng ký thất bại — vui lòng thử lại');
       }
-    } catch {
-      setError('Có lỗi xảy ra, vui lòng thử lại');
+    } catch (err) {
+      console.error('Register error:', err);
+      setError('Không thể kết nối server. Vui lòng thử lại sau.');
     } finally {
       setIsLoading(false);
     }
@@ -107,7 +152,7 @@ const Register = () => {
             <div className="text-center space-y-4">
               <CheckCircle className="h-16 w-16 text-green-500 mx-auto" />
               <h2 className="text-2xl font-semibold text-green-700">Đăng ký thành công!</h2>
-              <p className="text-sm text-muted-foreground">Bạn sẽ được chuyển hướng về trang chủ trong giây lát.</p>
+              <p className="text-sm text-muted-foreground">Bạn sẽ được chuyển đến trang đăng nhập trong giây lát.</p>
             </div>
           </CardContent>
         </Card>
@@ -115,43 +160,60 @@ const Register = () => {
     );
   }
 
+  // IconInput có IME guard tích hợp
   const IconInput = (props: {
     id: string;
-    name: string;
+    name: keyof FormData; // chỉ để gắn attribute/autoComplete
     type?: string;
     placeholder?: string;
     value: string;
-    onChange: (e: any) => void;
+    onChange: React.ChangeEventHandler<HTMLInputElement>;
     disabled?: boolean;
-    children?: React.ReactNode;
-  }) => (
-    <div>
-      <div className={`relative flex items-center rounded-md ${fieldErrors[props.name] ? 'ring-1 ring-red-300' : ''}`}>
-        <div className="absolute left-3 pointer-events-none"><span className="opacity-80">{props.children}</span></div>
-        <Input
-          id={props.id}
-          name={props.name}
-          type={props.type ?? 'text'}
-          placeholder={props.placeholder}
-          value={props.value}
-          onChange={props.onChange}
-          className="pl-10 w-full"
-          disabled={props.disabled}
-        />
+    autoComplete?: string;
+    children?: React.ReactNode; // icon
+    error?: string;
+  }) => {
+    const errorClasses = props.error ? 'border-red-500 focus-visible:ring-red-500' : '';
+    return (
+      <div>
+        <div className="relative flex items-center">
+          <div className="absolute left-3 pointer-events-none">
+            <span className="opacity-80">{props.children}</span>
+          </div>
+          <input
+            id={props.id}
+            name={props.name}
+            type={props.type ?? 'text'}
+            placeholder={props.placeholder}
+            value={props.value}
+            onChange={(e) => { if (!isComposing) props.onChange(e); }}
+            onCompositionStart={() => setIsComposing(true)}
+            onCompositionEnd={(e) => { setIsComposing(false); props.onChange(e as any); }}
+            className={`${inputBaseClasses} pl-10 w-full ${errorClasses}`}
+            disabled={props.disabled}
+            autoComplete={props.autoComplete}
+          />
+        </div>
+        {props.error && <p className="mt-1 text-sm text-red-600">{props.error}</p>}
       </div>
-      {fieldErrors[props.name] && <p className="mt-1 text-sm text-red-600">{fieldErrors[props.name]}</p>}
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 to-emerald-100 p-6">
       <Card className="w-full max-w-3xl shadow-xl rounded-2xl overflow-hidden">
         <div className="grid grid-cols-1 md:grid-cols-2">
-          {/* Left - branding: đổi thành StudentLife với icon (xanh lá) */}
+          {/* Left - branding */}
           <div className="hidden md:flex flex-col items-start justify-center p-10 bg-gradient-to-b from-emerald-600 to-emerald-700 text-white space-y-6">
             <div className="flex items-center gap-3">
-              {/* Hiển thị ảnh icon (nếu bạn có file public/graduation-cap.svg) */}
-              <img src="/graduation-cap.svg" alt="graduation cap" className="h-10 w-10" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
+              <img
+                src="/graduation-cap.svg"
+                alt="graduation cap"
+                className="h-10 w-10"
+                onError={(e) => {
+                  (e.currentTarget as HTMLImageElement).style.display = 'none';
+                }}
+              />
               <h1 className="text-3xl font-extrabold">StudentLife</h1>
             </div>
             <p className="text-sm opacity-90 max-w-xs">
@@ -173,23 +235,25 @@ const Register = () => {
               </Alert>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4" noValidate>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div  className="sm:col-span-2">
-                  <Label htmlFor="name" className="sr-only">Họ và tên</Label>
+                <div className="sm:col-span-2">
+                  <Label htmlFor="userName" className="sr-only">Username</Label>
                   <IconInput
-                    id="name"
-                    name="name"
-                    placeholder="Học và tên"
-                    value={formData.name}
-                    onChange={handleChange}
+                    id="userName"
+                    name="userName"
+                    placeholder="Tên đăng nhập"
+                    value={formData.userName}
+                    onChange={handleChange('userName')}
                     disabled={isLoading}
+                    autoComplete="username"
+                    error={fieldErrors.userName}
                   >
                     <User className="h-4 w-4" />
                   </IconInput>
                 </div>
 
-                <div  className="sm:col-span-2">
+                <div className="sm:col-span-2">
                   <Label htmlFor="email" className="sr-only">Email</Label>
                   <IconInput
                     id="email"
@@ -197,8 +261,10 @@ const Register = () => {
                     type="email"
                     placeholder="Email"
                     value={formData.email}
-                    onChange={handleChange}
+                    onChange={handleChange('email')}
                     disabled={isLoading}
+                    autoComplete="email"
+                    error={fieldErrors.email}
                   >
                     <Mail className="h-4 w-4" />
                   </IconInput>
@@ -213,8 +279,10 @@ const Register = () => {
                     name="university"
                     placeholder="Trường đại học hiện tại"
                     value={formData.university}
-                    onChange={handleChange}
+                    onChange={handleChange('university')}
                     disabled={isLoading}
+                    autoComplete="organization"
+                    error={fieldErrors.university}
                   >
                     <University className="h-4 w-4" />
                   </IconInput>
@@ -227,8 +295,9 @@ const Register = () => {
                     name="major"
                     placeholder="Ngành học hiện tại"
                     value={formData.major}
-                    onChange={handleChange}
+                    onChange={handleChange('major')}
                     disabled={isLoading}
+                    error={fieldErrors.major}
                   >
                     <BookOpen className="h-4 w-4" />
                   </IconInput>
@@ -243,8 +312,8 @@ const Register = () => {
                       id="year"
                       name="year"
                       value={formData.year}
-                      onChange={handleChange}
-                      className="w-full h-10 rounded-md px-3"
+                      onChange={handleSelect('year')}
+                      className="w-full h-10 rounded-md px-3 border border-input"
                       disabled={isLoading}
                     >
                       <option value="">Chọn năm</option>
@@ -253,7 +322,6 @@ const Register = () => {
                       <option value="3">3</option>
                       <option value="4">4</option>
                       <option value="5">5</option>
-                 
                     </select>
                   </div>
                   {fieldErrors.year && <p className="mt-1 text-sm text-red-600">{fieldErrors.year}</p>}
@@ -262,24 +330,30 @@ const Register = () => {
                 <div className="sm:col-span-2">
                   <Label htmlFor="password" className="sr-only">Mật khẩu</Label>
                   <div className="relative">
-                    <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"><Lock className="h-4 w-4 opacity-80" /></div>
-                    <Input
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <Lock className="h-4 w-4 opacity-80" />
+                    </div>
+                    <input
                       id="password"
                       name="password"
                       type={showPassword ? 'text' : 'password'}
                       placeholder="Mật khẩu (≥6 ký tự)"
                       value={formData.password}
-                      onChange={handleChange}
-                      className="pl-10 pr-10"
+                      onChange={(e) => { if (!isComposing) handleChange('password')(e); }}
+                      onCompositionStart={() => setIsComposing(true)}
+                      onCompositionEnd={(e) => { setIsComposing(false); handleChange('password')(e as any); }}
+                      className={`${inputBaseClasses} pl-10 pr-10 ${fieldErrors.password ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                       disabled={isLoading}
+                      autoComplete="new-password"
                     />
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0"
-                      onClick={() => setShowPassword(prev => !prev)}
+                      onClick={() => setShowPassword((p) => !p)}
                       disabled={isLoading}
+                      aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
                     >
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </Button>
@@ -291,24 +365,30 @@ const Register = () => {
               <div>
                 <Label htmlFor="confirmPassword" className="sr-only">Xác nhận mật khẩu</Label>
                 <div className="relative">
-                  <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"><Lock className="h-4 w-4 opacity-80" /></div>
-                  <Input
+                  <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                    <Lock className="h-4 w-4 opacity-80" />
+                  </div>
+                  <input
                     id="confirmPassword"
                     name="confirmPassword"
                     type={showConfirmPassword ? 'text' : 'password'}
                     placeholder="Nhập lại mật khẩu"
                     value={formData.confirmPassword}
-                    onChange={handleChange}
-                    className="pl-10 pr-10"
+                    onChange={(e) => { if (!isComposing) handleChange('confirmPassword')(e); }}
+                    onCompositionStart={() => setIsComposing(true)}
+                    onCompositionEnd={(e) => { setIsComposing(false); handleChange('confirmPassword')(e as any); }}
+                    className={`${inputBaseClasses} pl-10 pr-10 ${fieldErrors.confirmPassword ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                     disabled={isLoading}
+                    autoComplete="new-password"
                   />
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     className="absolute right-1 top-1/2 -translate-y-1/2 h-8 w-8 p-0"
-                    onClick={() => setShowConfirmPassword(prev => !prev)}
+                    onClick={() => setShowConfirmPassword((p) => !p)}
                     disabled={isLoading}
+                    aria-label={showConfirmPassword ? 'Ẩn xác nhận mật khẩu' : 'Hiện xác nhận mật khẩu'}
                   >
                     {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
@@ -337,6 +417,4 @@ const Register = () => {
       </Card>
     </div>
   );
-};
-
-export default Register;
+}
