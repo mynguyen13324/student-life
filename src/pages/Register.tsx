@@ -32,8 +32,51 @@ type RegisterFormData = {
 
 // Tailwind classes để mô phỏng shadcn/ui <Input>
 const inputBaseClasses =
-  "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
+  'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
 
+// ===== Stable IconInput (đặt ngoài Register để không bị remount mỗi render) =====
+type IconInputProps = {
+  id: string;
+  name: keyof RegisterFormData; // chỉ để gắn attribute/autoComplete
+  type?: string;
+  placeholder?: string;
+  value: string;
+  onChange: React.ChangeEventHandler<HTMLInputElement>;
+  disabled?: boolean;
+  autoComplete?: string;
+  children?: React.ReactNode; // icon
+  error?: string;
+};
+
+function IconInput(props: IconInputProps) {
+  const errorClasses = props.error ? 'border-red-500 focus-visible:ring-red-500' : '';
+  return (
+    <div>
+      <div className="relative flex items-center">
+        <div className="absolute left-3 pointer-events-none">
+          <span className="opacity-80">{props.children}</span>
+        </div>
+        <input
+          id={props.id}
+          name={props.name}
+          type={props.type ?? 'text'}
+          placeholder={props.placeholder}
+          value={props.value}
+          onChange={props.onChange}
+          className={`${inputBaseClasses} pl-10 w-full ${errorClasses}`}
+          disabled={props.disabled}
+          autoComplete={props.autoComplete}
+          // các thuộc tính giúp tránh can thiệp ngoài ý muốn
+          autoCapitalize="off"
+          spellCheck={false}
+        />
+      </div>
+      {props.error && <p className="mt-1 text-sm text-red-600">{props.error}</p>}
+    </div>
+  );
+}
+
+// ===== Component chính =====
 export default function Register() {
   // Favicon (Vite: để /public/graduation-cap.svg)
   useEffect(() => {
@@ -59,18 +102,16 @@ export default function Register() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [isComposing, setIsComposing] = useState(false); // IME guard
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
 
   const navigate = useNavigate();
 
-  // Handler factory: KHÔNG dựa vào e.currentTarget.name → tránh bug pooling/name mismatch
+  // Handler factory: KHÔNG dựa vào e.currentTarget.name
   const handleChange =
     <K extends keyof RegisterFormData>(key: K) =>
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (isComposing) return; // IME: đang composition thì chưa cập nhật
       const value = e.target.value;
       setFormData((prev) => ({ ...prev, [key]: value }));
       setFieldErrors((prev) => ({ ...prev, [key]: '' }));
@@ -153,45 +194,6 @@ export default function Register() {
       </div>
     );
   }
-
-  // IconInput có IME guard tích hợp
-  const IconInput = (props: {
-    id: string;
-    name: keyof RegisterFormData; // chỉ để gắn attribute/autoComplete
-    type?: string;
-    placeholder?: string;
-    value: string;
-    onChange: React.ChangeEventHandler<HTMLInputElement>;
-    disabled?: boolean;
-    autoComplete?: string;
-    children?: React.ReactNode; // icon
-    error?: string;
-  }) => {
-    const errorClasses = props.error ? 'border-red-500 focus-visible:ring-red-500' : '';
-    return (
-      <div>
-        <div className="relative flex items-center">
-          <div className="absolute left-3 pointer-events-none">
-            <span className="opacity-80">{props.children}</span>
-          </div>
-          <input
-            id={props.id}
-            name={props.name}
-            type={props.type ?? 'text'}
-            placeholder={props.placeholder}
-            value={props.value}
-            onChange={(e) => { if (!isComposing) props.onChange(e); }}
-            onCompositionStart={() => setIsComposing(true)}
-            onCompositionEnd={(e) => { setIsComposing(false); props.onChange(e as any); }}
-            className={`${inputBaseClasses} pl-10 w-full ${errorClasses}`}
-            disabled={props.disabled}
-            autoComplete={props.autoComplete}
-          />
-        </div>
-        {props.error && <p className="mt-1 text-sm text-red-600">{props.error}</p>}
-      </div>
-    );
-  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-emerald-50 to-emerald-100 p-6">
@@ -333,12 +335,12 @@ export default function Register() {
                       type={showPassword ? 'text' : 'password'}
                       placeholder="Mật khẩu (≥6 ký tự)"
                       value={formData.password}
-                      onChange={(e) => { if (!isComposing) handleChange('password')(e); }}
-                      onCompositionStart={() => setIsComposing(true)}
-                      onCompositionEnd={(e) => { setIsComposing(false); handleChange('password')(e as any); }}
+                      onChange={handleChange('password')}
                       className={`${inputBaseClasses} pl-10 pr-10 ${fieldErrors.password ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                       disabled={isLoading}
                       autoComplete="new-password"
+                      autoCapitalize="off"
+                      spellCheck={false}
                     />
                     <Button
                       type="button"
@@ -368,12 +370,12 @@ export default function Register() {
                     type={showConfirmPassword ? 'text' : 'password'}
                     placeholder="Nhập lại mật khẩu"
                     value={formData.confirmPassword}
-                    onChange={(e) => { if (!isComposing) handleChange('confirmPassword')(e); }}
-                    onCompositionStart={() => setIsComposing(true)}
-                    onCompositionEnd={(e) => { setIsComposing(false); handleChange('confirmPassword')(e as any); }}
+                    onChange={handleChange('confirmPassword')}
                     className={`${inputBaseClasses} pl-10 pr-10 ${fieldErrors.confirmPassword ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
                     disabled={isLoading}
                     autoComplete="new-password"
+                    autoCapitalize="off"
+                    spellCheck={false}
                   />
                   <Button
                     type="button"

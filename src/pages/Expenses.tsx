@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-  DialogDescription, // ⬅️ thêm để tránh warning
+  DialogDescription,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -30,14 +30,13 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 // ❌ bỏ vì không dùng: import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Plus, TrendingUp, TrendingDown, PieChart, Target, AlertCircle, DollarSign, Pencil, Trash2 } from "lucide-react";
 
 const categoryOptions: ExpenseCategory[] = [
   "FOOD",
-  "EDUCATION",
-  "ENTERTAINMENT",
+  "STUDY",
   "TRANSPORT",
-  "SHOPPING",
   "OTHER",
 ];
 
@@ -56,6 +55,7 @@ export default function Expenses() {
   // ---- data state ----
   const [items, setItems] = useState<UiExpense[]>([]);
   const [loading, setLoading] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
 
   // ---- pagination ----
   const [pageSize, setPageSize] = useState(10);
@@ -72,6 +72,9 @@ export default function Expenses() {
   const [fMax, setFMax] = useState<string>("");
   const [fStart, setFStart] = useState<string>("");
   const [fEnd, setFEnd] = useState<string>("");
+
+  // Đảm bảo “Tìm/Xóa lọc” kích hoạt refetch đúng lúc
+  const [queryNonce, setQueryNonce] = useState(0);
 
   // ---- dialog ----
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -124,9 +127,10 @@ export default function Expenses() {
     },
   });
 
-  // ---- fetch ----
+  // ---- fetch (chịu mọi shape) ----
   const fetchData = async () => {
     setLoading(true);
+    setErrMsg("");
     try {
       const payload: SearchExpenseDTO = {
         pageIndex,
@@ -139,11 +143,24 @@ export default function Expenses() {
         endDate: fEnd ? `${fEnd}T23:59:59` : undefined,
         paymentMethod: fPayment === "ALL" ? undefined : fPayment,
       };
-      const page = await ExpenseAPI.search(payload);
-      setItems((page.content ?? []).map(toUi));
+
+      const res = await ExpenseAPI.search(payload) as any;
+
+      // Hỗ trợ cả 2 kiểu:
+      // - Page<ExpenseDTO>:        res.content
+      // - ResponseDTO<Page<...>>:  res.data.content
+      const page = res?.content ? res : (res?.data ?? res);
+      if (!page || !Array.isArray(page?.content)) {
+        throw new Error("Dữ liệu trả về không đúng định dạng trang.");
+      }
+
+      setItems((page.content as any[]).map(toUi));
       setTotalPages(page.totalPages ?? 0);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error("Expense fetch error:", e);
+      setItems([]);
+      setTotalPages(0);
+      setErrMsg(e?.message || "Không thể tải dữ liệu chi tiêu.");
     } finally {
       setLoading(false);
     }
@@ -152,7 +169,7 @@ export default function Expenses() {
   useEffect(() => {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageIndex, pageSize]);
+  }, [pageIndex, pageSize, queryNonce]);
 
   // ---- handlers ----
   const onSubmit = async (values: z.infer<typeof expenseFormSchema>) => {
@@ -380,6 +397,13 @@ export default function Expenses() {
         </Dialog>
       </div>
 
+      {/* Error */}
+      {errMsg && (
+        <Alert variant="destructive">
+          <AlertDescription>{errMsg}</AlertDescription>
+        </Alert>
+      )}
+
       {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <Card>
@@ -550,7 +574,7 @@ export default function Expenses() {
           </div>
 
           <div className="flex items-end gap-2 mt-3">
-            <Button onClick={() => { setPageIndex(0); fetchData(); }}>Tìm</Button>
+            <Button onClick={() => { setPageIndex(0); setQueryNonce(n => n + 1); }}>Tìm</Button>
             <Button
               variant="outline"
               onClick={() => {
@@ -562,7 +586,7 @@ export default function Expenses() {
                 setFStart("");
                 setFEnd("");
                 setPageIndex(0);
-                fetchData();
+                setQueryNonce(n => n + 1);
               }}
             >
               Xóa lọc
@@ -591,10 +615,10 @@ export default function Expenses() {
             </TableHeader>
             <TableBody>
               {items.length ? items.map((it) => (
-                <TableRow key={it.id}>
+                <TableRow key={it.id ?? `${it.date}-${it.time}-${it.amount}`}>
                   <TableCell>{new Date(`${it.date}T00:00:00`).toLocaleDateString("vi-VN")}</TableCell>
                   <TableCell>{it.time}</TableCell>
-                  <TableCell className="max-w-[280px] truncate" title={it.description}>
+                  <TableCell className="max-w-[280px] truncate" title={it.description ?? ""}>
                     {it.description || "-"}
                   </TableCell>
                   <TableCell><Badge variant="outline">{it.category}</Badge></TableCell>
@@ -627,7 +651,9 @@ export default function Expenses() {
                 </TableRow>
               )) : (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center">Không có dữ liệu.</TableCell>
+                  <TableCell colSpan={7} className="text-center">
+                    {loading ? "Đang tải..." : "Không có dữ liệu."}
+                  </TableCell>
                 </TableRow>
               )}
             </TableBody>

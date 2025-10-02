@@ -1,6 +1,7 @@
+// src/app/.../Task.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,74 +20,101 @@ import { format, isSameDay } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Plus, Calendar as CalendarIcon, CheckSquare, Search, Pencil, Trash2 } from "lucide-react";
 
-// ====== Helpers ======
+import { TaskAPI, type TaskDTO } from "@/api/task";
+
+// ==========================
+// Helpers datetime (LocalDateTime chuỗi, không có 'Z')
+// ==========================
 const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/; // HH:MM
-const combineDateTimeToISO = (date: Date, timeHHMM: string) => {
+const combineDateTimeToLocal = (date: Date, timeHHMM: string) => {
   const [h, m] = timeHHMM.split(":").map(Number);
   const d = new Date(date);
   d.setHours(h, m, 0, 0);
-  return d.toISOString();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(h)}:${pad(m)}:00`;
 };
 const isoToDate = (iso?: string) => (iso ? new Date(iso) : undefined);
 const isoToTimeHHMM = (iso?: string) =>
   iso ? new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "09:00";
 
-// ====== Seed data ======
-const initialTasks = [
-  {
-    id: 1,
-    title: "Bài tập Toán cao cấp - Chương 3",
-    description: "Ôn phần tích phân",
-    category: "học tập",
-    deadline: new Date("2024-01-15T17:00:00").toISOString(),
-    status: "todo",
-    priority: "high",
-  },
-  {
-    id: 2,
-    title: "Project Website - Frontend",
-    description: "Implement UI header/footer",
-    category: "làm việc",
-    deadline: new Date("2024-01-18T09:00:00").toISOString(),
-    status: "doing",
-    priority: "high",
-  },
-  {
-    id: 3,
-    title: "Báo cáo Database Design",
-    description: "Chuẩn hóa 3NF",
-    category: "học tập",
-    deadline: new Date("2024-01-20T13:30:00").toISOString(),
-    status: "todo",
-    priority: "medium",
-  },
-  {
-    id: 4,
-    title: "Ôn tập giữa kỳ Toán",
-    description: "Chương 1-2",
-    category: "học tập",
-    deadline: new Date("2024-01-22T19:00:00").toISOString(),
-    status: "done",
-    priority: "low",
-  },
-];
+// ==========================
+// UI types & map API <-> UI
+// ==========================
+type UiPriority = "high" | "medium" | "low";
+type UiStatus = "todo" | "doing" | "done";
+type UiCategory = "học tập" | "làm việc" | "khác"; // FE-only
 
+type UiTask = {
+  id: string;
+  title: string;
+  description: string;
+  category: UiCategory; // FE-only
+  deadline: string; // ISO
+  status: UiStatus;
+  priority: UiPriority;
+};
+
+const apiStatusToUi = (s: TaskDTO["status"]): UiStatus =>
+  s === "DONE" ? "done" : s === "IN_PROGRESS" ? "doing" : "todo";
+
+const uiStatusToApi = (s: UiStatus): TaskDTO["status"] =>
+  s === "done" ? "DONE" : s === "doing" ? "IN_PROGRESS" : "TODO";
+
+const apiPriorityToUi = (p: TaskDTO["priority"]): UiPriority =>
+  p === "LOW" ? "low" : p === "HIGH" || p === "URGENT" ? "high" : "medium";
+
+const uiPriorityToApi = (p: UiPriority): TaskDTO["priority"] =>
+  p === "low" ? "LOW" : p === "high" ? "HIGH" : "MEDIUM";
+
+const dtoToUi = (t: TaskDTO): UiTask => ({
+  id: t.id,
+  title: t.title,
+  description: t.description ?? "",
+  category: "khác", // BE không có -> mặc định, sẽ áp lại từ localStorage
+  deadline: t.deadline ?? new Date().toISOString(),
+  status: apiStatusToUi(t.status),
+  priority: apiPriorityToUi(t.priority),
+});
+
+// ==========================
+// LocalStorage cho category (FE-only)
+// ==========================
+const CAT_KEY = "task_ui_categories_v1";
+const loadCatMap = (): Record<string, UiCategory> => {
+  try {
+    return JSON.parse(localStorage.getItem(CAT_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+};
+const saveCat = (id: string, cat: UiCategory) => {
+  const m = loadCatMap();
+  m[id] = cat;
+  localStorage.setItem(CAT_KEY, JSON.stringify(m));
+};
+const removeCat = (id: string) => {
+  const m = loadCatMap();
+  delete m[id];
+  localStorage.setItem(CAT_KEY, JSON.stringify(m));
+};
+
+// ==========================
+// Component
+// ==========================
 export const Tasks = () => {
-  const [filterCategory, setFilterCategory] = useState("all");
+  const [filterCategory, setFilterCategory] = useState<"all" | UiCategory>("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [filterDate, setFilterDate] = useState<Date | undefined>(undefined);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleteCandidateId, setDeleteCandidateId] = useState<number | null>(null);
+  const [deleteCandidateId, setDeleteCandidateId] = useState<string | null>(null);
 
   const priorities = ["high", "medium", "low"] as const;
   const categories = ["học tập", "làm việc", "khác"] as const;
 
-  // State danh sách tasks
-  const [tasks, setTasks] = useState(initialTasks.map((t) => ({ ...t })));
-
-  // editing state: null => tạo mới; id => chỉnh sửa task đó
-  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+  const [tasks, setTasks] = useState<UiTask[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
   // ====== Form schema ======
   const taskFormSchema = z
@@ -98,7 +126,10 @@ export const Tasks = () => {
       deadlineTime: z.string().regex(timeRegex, "Giờ không hợp lệ (HH:MM)"),
       priority: z.enum(priorities, { required_error: "Độ ưu tiên là bắt buộc" }),
     })
-    .refine((d) => !!d.deadlineDate && timeRegex.test(d.deadlineTime), { message: "Ngày/Giờ không hợp lệ", path: ["deadlineTime"] });
+    .refine((d) => !!d.deadlineDate && timeRegex.test(d.deadlineTime), {
+      message: "Ngày/Giờ không hợp lệ",
+      path: ["deadlineTime"],
+    });
 
   type TaskForm = z.infer<typeof taskFormSchema>;
 
@@ -114,6 +145,29 @@ export const Tasks = () => {
     },
   });
 
+  // ====== Load danh sách từ API ======
+  const loadTasks = async () => {
+    try {
+      setLoading(true);
+      const page = await TaskAPI.search({}, 0, 100); // ⬅️ apiRequest trả trực tiếp Page<TaskDTO>
+      const catMap = loadCatMap();
+      const list = page.content.map((d) => {
+        const ui = dtoToUi(d);
+        ui.category = catMap[d.id] ?? "khác";
+        return ui;
+      });
+      setTasks(list);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTasks();
+  }, []);
+
   const resetFormToCreate = () => {
     form.reset({
       title: "",
@@ -126,42 +180,56 @@ export const Tasks = () => {
     setEditingTaskId(null);
   };
 
-  const onSubmit = (values: TaskForm) => {
-    if (editingTaskId !== null) {
-      // update existing
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === editingTaskId
-            ? {
-                ...t,
-                title: values.title,
-                description: values.description ?? "",
-                category: values.category,
-                deadline: combineDateTimeToISO(values.deadlineDate, values.deadlineTime),
-                priority: values.priority,
-              }
-            : t
-        )
-      );
-    } else {
-      // create new
-      const newTask = {
-        id: tasks.length ? Math.max(...tasks.map((t) => t.id)) + 1 : 1,
-        title: values.title,
-        description: values.description ?? "",
-        category: values.category,
-        deadline: combineDateTimeToISO(values.deadlineDate, values.deadlineTime),
-        status: "todo" as const,
-        priority: values.priority,
-      };
-      setTasks((prev) => [newTask, ...prev]);
+  const onSubmit = async (values: TaskForm) => {
+    const deadline = combineDateTimeToLocal(values.deadlineDate, values.deadlineTime);
+    try {
+      if (editingTaskId !== null) {
+        await TaskAPI.update(editingTaskId, {
+          title: values.title,
+          description: values.description ?? "",
+          deadline,
+          priority: uiPriorityToApi(values.priority),
+        });
+        // optimistic update + lưu category FE-only
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === editingTaskId
+              ? {
+                  ...t,
+                  title: values.title,
+                  description: values.description ?? "",
+                  category: values.category,
+                  deadline,
+                  priority: values.priority,
+                }
+              : t
+          )
+        );
+        saveCat(editingTaskId, values.category);
+      } else {
+        const created = await TaskAPI.add({
+          title: values.title,
+          description: values.description ?? "",
+          deadline,
+          status: "TODO",
+          priority: uiPriorityToApi(values.priority),
+          // không cần courseId nếu không dùng
+        });
+        const ui = dtoToUi(created);
+        ui.category = values.category; // giữ category FE
+        saveCat(ui.id, ui.category);
+        setTasks((prev) => [ui, ...prev]);
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Có lỗi khi lưu task");
     }
 
     setDialogOpen(false);
     resetFormToCreate();
   };
 
-  // ====== Render helpers ======
+  // ====== Helpers render ======
   const getStatusColor = (status: string) => {
     switch (status) {
       case "todo":
@@ -174,7 +242,6 @@ export const Tasks = () => {
         return "bg-gray-100 text-gray-800 border-gray-200";
     }
   };
-
   const getStatusText = (status: string) => {
     switch (status) {
       case "todo":
@@ -187,7 +254,6 @@ export const Tasks = () => {
         return status;
     }
   };
-
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case "high":
@@ -201,45 +267,55 @@ export const Tasks = () => {
     }
   };
 
-  // ====== Filtering ======
-  const filteredTasks = tasks.filter((task) => {
-    const byCategory = filterCategory === "all" || task.category === filterCategory;
-    const term = searchTerm.trim().toLowerCase();
-    const bySearch =
-      !term ||
-      task.title.toLowerCase().includes(term) ||
-      task.description.toLowerCase().includes(term) ||
-      task.category.toLowerCase().includes(term);
-    const byDate = !filterDate || isSameDay(new Date(task.deadline), filterDate);
-    return byCategory && bySearch && byDate;
-  });
+  // ====== Filter (FE) ======
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      const byCategory = filterCategory === "all" || task.category === filterCategory;
+      const term = searchTerm.trim().toLowerCase();
+      const bySearch =
+        !term ||
+        task.title.toLowerCase().includes(term) ||
+        task.description.toLowerCase().includes(term) ||
+        task.category.toLowerCase().includes(term);
+      const byDate = !filterDate || isSameDay(new Date(task.deadline), filterDate);
+      return byCategory && bySearch && byDate;
+    });
+  }, [tasks, filterCategory, searchTerm, filterDate]);
 
-  // ====== CRUD helpers for UI buttons ======
-  const startEditTask = (taskId: number) => {
+  // ====== CRUD UI helpers ======
+  const startEditTask = (taskId: string) => {
     const t = tasks.find((x) => x.id === taskId);
     if (!t) return;
     form.reset({
       title: t.title,
       description: t.description ?? "",
-      category: t.category as any,
+      category: t.category,
       deadlineDate: isoToDate(t.deadline),
       deadlineTime: isoToTimeHHMM(t.deadline),
-      priority: t.priority as any,
+      priority: t.priority,
     });
     setEditingTaskId(taskId);
     setDialogOpen(true);
   };
 
-  const requestDeleteTask = (taskId: number) => {
+  const requestDeleteTask = (taskId: string) => {
     setDeleteCandidateId(taskId);
     setDeleteDialogOpen(true);
   };
 
-  const confirmDeleteTask = () => {
-    if (deleteCandidateId == null) return;
-    setTasks((prev) => prev.filter((x) => x.id !== deleteCandidateId));
-    setDeleteCandidateId(null);
-    setDeleteDialogOpen(false);
+  const confirmDeleteTask = async () => {
+    if (!deleteCandidateId) return;
+    try {
+      await TaskAPI.remove(deleteCandidateId);
+      setTasks((prev) => prev.filter((x) => x.id !== deleteCandidateId));
+      removeCat(deleteCandidateId);
+    } catch (e) {
+      console.error(e);
+      alert("Xóa task thất bại");
+    } finally {
+      setDeleteCandidateId(null);
+      setDeleteDialogOpen(false);
+    }
   };
 
   const cancelDelete = () => {
@@ -247,7 +323,21 @@ export const Tasks = () => {
     setDeleteDialogOpen(false);
   };
 
-  // Action buttons component (hover-only via group-hover)
+  // Toggle DONE <-> TODO (giữ bố cục, Doing không dùng ở checkbox)
+  const toggleDone = async (task: UiTask, checked: boolean) => {
+    const newUiStatus: UiStatus = checked ? "done" : "todo";
+    const old = task.status;
+    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: newUiStatus } : t)));
+    try {
+      await TaskAPI.update(task.id, { status: uiStatusToApi(newUiStatus) });
+    } catch (e) {
+      console.error(e);
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: old } : t)));
+      alert("Cập nhật trạng thái thất bại");
+    }
+  };
+
+  // Action buttons (hover-only)
   const ActionButtons = ({ onEdit, onDelete }: { onEdit: () => void; onDelete: () => void }) => (
     <div className="absolute right-3 top-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
       <button
@@ -286,9 +376,7 @@ export const Tasks = () => {
         <Dialog
           open={dialogOpen}
           onOpenChange={(open) => {
-            if (!open) {
-              resetFormToCreate();
-            }
+            if (!open) resetFormToCreate();
             setDialogOpen(open);
           }}
         >
@@ -361,7 +449,7 @@ export const Tasks = () => {
                     name="category"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Danh mục</FormLabel>
+                        <FormLabel>Danh mục (UI)</FormLabel>
                         <Select onValueChange={field.onChange} value={field.value}>
                           <SelectTrigger>
                             <SelectValue placeholder="Chọn danh mục" />
@@ -389,10 +477,7 @@ export const Tasks = () => {
                           <PopoverTrigger asChild>
                             <Button
                               variant="outline"
-                              className={cn(
-                                "w-full justify-start text-left font-normal",
-                                !field.value && "text-muted-foreground"
-                              )}
+                              className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}
                             >
                               <CalendarIcon className="mr-2 h-4 w-4" />
                               {field.value ? format(field.value, "dd/MM/yyyy") : "Chọn ngày"}
@@ -443,7 +528,7 @@ export const Tasks = () => {
 
       {/* Filters row */}
       <div className="flex flex-wrap items-center gap-3">
-        <Select value={filterCategory} onValueChange={setFilterCategory}>
+        <Select value={filterCategory} onValueChange={(v: any) => setFilterCategory(v)}>
           <SelectTrigger className="w-48">
             <SelectValue placeholder="Lọc theo danh mục" />
           </SelectTrigger>
@@ -478,62 +563,67 @@ export const Tasks = () => {
             <CalendarComponent mode="single" selected={filterDate} onSelect={setFilterDate} />
           </PopoverContent>
         </Popover>
-        {filterDate && <Button variant="ghost" onClick={() => setFilterDate(undefined)}>Bỏ lọc ngày</Button>}
+        {filterDate && (
+          <Button variant="ghost" onClick={() => setFilterDate(undefined)}>
+            Bỏ lọc ngày
+          </Button>
+        )}
       </div>
 
       {/* List */}
       <div className="grid gap-4">
-        {filteredTasks.map((task) => (
-          <Card key={task.id} className="hover:shadow-md transition-shadow relative group">
-            <CardContent className="p-4">
-              {/* Action buttons in top-right - hover-only */}
-              <ActionButtons
-                onEdit={() => startEditTask(task.id)}
-                onDelete={() => requestDeleteTask(task.id)}
-              />
+        {loading && (
+          <Card>
+            <CardContent className="p-6 text-center text-muted-foreground">Đang tải...</CardContent>
+          </Card>
+        )}
 
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-4">
-                  <Checkbox
-                    checked={task.status === "done"}
-                    onCheckedChange={(checked) => {
-                      const isDone = checked === true;
-                      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: isDone ? "done" : "todo" } : t)));
-                    }}
-                    className="h-5 w-5"
-                  />
-                  <div className="flex items-center space-x-2">
-                    <div className={`h-3 w-3 rounded-full ${getPriorityColor(task.priority)}`}></div>
-                    <div>
-                      <h3 className={`font-medium text-foreground ${task.status === "done" ? "line-through text-muted-foreground" : ""}`}>
-                        {task.title}
-                      </h3>
-                      <p className="text-sm text-muted-foreground">{task.category}</p>
+        {!loading &&
+          filteredTasks.map((task) => (
+            <Card key={task.id} className="hover:shadow-md transition-shadow relative group">
+              <CardContent className="p-4">
+                {/* Action buttons */}
+                <ActionButtons onEdit={() => startEditTask(task.id)} onDelete={() => requestDeleteTask(task.id)} />
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <Checkbox
+                      checked={task.status === "done"}
+                      onCheckedChange={(checked) => toggleDone(task, checked === true)}
+                      className="h-5 w-5"
+                    />
+                    <div className="flex items-center space-x-2">
+                      <div className={`h-3 w-3 rounded-full ${getPriorityColor(task.priority)}`}></div>
+                      <div>
+                        <h3 className={`font-medium text-foreground ${task.status === "done" ? "line-through text-muted-foreground" : ""}`}>
+                          {task.title}
+                        </h3>
+                        <p className="text-sm text-muted-foreground">{task.category}</p>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="flex items-center space-x-3">
-                  <div className="flex items-center space-x-1 text-sm text-muted-foreground">
-                    <CalendarIcon className="h-4 w-4" />
-                    <span>
-                      {new Date(task.deadline).toLocaleString("vi-VN", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "numeric",
-                      })}
-                    </span>
+                  <div className="flex items-center space-x-3">
+                    <div className="flex items-center space-x-1 text-sm text-muted-foreground">
+                      <CalendarIcon className="h-4 w-4" />
+                      <span>
+                        {new Date(task.deadline).toLocaleString("vi-VN", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "numeric",
+                        })}
+                      </span>
+                    </div>
+                    <Badge className={getStatusColor(task.status)}>{getStatusText(task.status)}</Badge>
                   </div>
-                  <Badge className={getStatusColor(task.status)}>{getStatusText(task.status)}</Badge>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          ))}
 
-        {filteredTasks.length === 0 && (
+        {!loading && filteredTasks.length === 0 && (
           <Card>
             <CardContent className="p-6 text-center text-muted-foreground">Không có task phù hợp.</CardContent>
           </Card>
@@ -541,7 +631,13 @@ export const Tasks = () => {
       </div>
 
       {/* Delete confirmation dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={(open) => { if (!open) cancelDelete(); setDeleteDialogOpen(open); }}>
+      <Dialog
+        open={deleteDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) cancelDelete();
+          setDeleteDialogOpen(open);
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Xác nhận xóa</DialogTitle>
@@ -552,7 +648,9 @@ export const Tasks = () => {
               <strong>{deleteCandidateId ? tasks.find((t) => t.id === deleteCandidateId)?.title : ""}</strong>? Hành động này không thể hoàn tác.
             </p>
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="outline" onClick={cancelDelete}>Hủy</Button>
+              <Button variant="outline" onClick={cancelDelete}>
+                Hủy
+              </Button>
               <Button onClick={confirmDeleteTask}>Xóa</Button>
             </div>
           </div>
