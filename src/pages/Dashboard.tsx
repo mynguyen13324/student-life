@@ -36,14 +36,14 @@ function isSameMonth(dateStr: string, ref = new Date()) {
   return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth();
 }
 
-/** Chuẩn hoá mọi kiểu expense có thể xuất hiện trong localStorage. */
+
 function normalizeExpense(anyItem: any): ExpenseLite | null {
   if (!anyItem) return null;
   const rawAmount = anyItem.amount ?? anyItem.total ?? anyItem.value;
   const amount = Number(rawAmount);
   if (!Number.isFinite(amount)) return null;
 
-  // hỗ trợ cả 'date' (yyyy-MM-dd) hoặc 'expenseDate' (ISO)
+  
   let date: string | undefined = anyItem.date;
   if (!date && typeof anyItem.expenseDate === "string") {
     date = anyItem.expenseDate.slice(0, 10);
@@ -70,7 +70,7 @@ function normalizeExpense(anyItem: any): ExpenseLite | null {
 
 /* ------------- component -------------- */
 export const Dashboard = () => {
-  // KHÔNG dùng dữ liệu mẫu nữa. Chỉ lấy từ localStorage.
+ 
   const [todaySchedule, setTodaySchedule] = useState<Course[]>(() => loadSchedule());
   const [upcomingTasks, setUpcomingTasks] = useState<Task[]>(() => loadTasks());
   const [expensesCache, setExpensesCache] = useState<ExpenseLite[]>(() => {
@@ -84,7 +84,7 @@ export const Dashboard = () => {
     return Number.isFinite(num) && num >= 0 ? num : 5_000_000;
   });
 
-  // Lắng nghe localStorage + custom events để tự reload (không API)
+  
   useEffect(() => {
     const reload = () => {
       setTodaySchedule(loadSchedule());
@@ -113,7 +113,7 @@ export const Dashboard = () => {
     };
   }, []);
 
-  /* ----- derive (không render số liệu khi rỗng) ----- */
+  
   const now = new Date();
 
   const scheduleTodaySorted = useMemo(
@@ -191,7 +191,7 @@ export const Dashboard = () => {
                   </div>
                 ))}
               </div>
-            ) : null /* rỗng khi không có dữ liệu */}
+            ) : null }
           </CardContent>
         </Card>
 
@@ -216,7 +216,7 @@ export const Dashboard = () => {
                   </div>
                 ))}
               </div>
-            ) : null /* rỗng khi không có dữ liệu */}
+            ) : null }
           </CardContent>
         </Card>
 
@@ -227,7 +227,7 @@ export const Dashboard = () => {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            {/* Nếu không có chi tiêu, để rỗng (không hiển thị số 0) */}
+            
             {expensesThisMonth.length ? (
               <>
                 <div className="text-2xl font-bold text-primary">{toCurrency(monthlyExpenses)}</div>

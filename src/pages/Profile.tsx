@@ -79,13 +79,21 @@ export const Profile = () => {
 
   const handleSave = async () => {
     if (!profileData) return;
+
+    // Check email đơn giản
+    const emailOk = !!profileData.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profileData.email);
+    if (!emailOk) {
+      toast.error("Email không hợp lệ.");
+      return;
+    }
+
     setIsSaving(true);
     try {
-      // Gọi API thật: PUT /api/users/profile
       const updated = await apiRequest<ProfileData>('/users/profile', {
         method: 'PUT',
         body: JSON.stringify({
           userName: profileData.userName,
+          email: profileData.email,           
           university: profileData.university,
           major: profileData.major,
           yearOfStudy: profileData.yearOfStudy
@@ -100,10 +108,6 @@ export const Profile = () => {
     }
   };
 
-  const handlePasswordInputChange = (field: string, value: string) => {
-    setPasswordForm(prev => ({ ...prev, [field]: value }));
-  };
-
   const handleChangePassword = async () => {
     if (passwordForm.newPassword !== passwordForm.confirmNewPassword) {
       toast.error("Mật khẩu mới và xác nhận không khớp.");
@@ -111,10 +115,13 @@ export const Profile = () => {
     }
     setIsChangingPassword(true);
     try {
-      // Gọi API thật: POST /api/users/change-password
       await apiRequest<unknown>('/users/change-password', {
-        method: 'POST',
-        body: JSON.stringify(passwordForm)
+        method: 'PUT',
+        body: JSON.stringify({
+          oldPassword: passwordForm.currentPassword,
+          newPassword: passwordForm.newPassword,
+          reNewPassword: passwordForm.confirmNewPassword,
+        })
       });
       toast.success("Mật khẩu đã được thay đổi!");
       setPasswordForm({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
@@ -167,7 +174,9 @@ export const Profile = () => {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" value={profileData.email} disabled />
+                  
+                  <Input id="email" type="email" value={profileData.email}
+                         onChange={(e) => handleInputChange("email", e.target.value)} />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="major">Chuyên ngành</Label>
@@ -208,17 +217,17 @@ export const Profile = () => {
             <div className="space-y-2">
               <Label htmlFor="currentPassword">Mật khẩu hiện tại</Label>
               <Input id="currentPassword" type="password" value={passwordForm.currentPassword}
-                     onChange={(e) => handlePasswordInputChange("currentPassword", e.target.value)} placeholder="••••••••"/>
+                     onChange={(e) => setPasswordForm(p => ({ ...p, currentPassword: e.target.value }))} placeholder="••••••••"/>
             </div>
             <div className="space-y-2">
               <Label htmlFor="newPassword">Mật khẩu mới</Label>
               <Input id="newPassword" type="password" value={passwordForm.newPassword}
-                     onChange={(e) => handlePasswordInputChange("newPassword", e.target.value)} placeholder="••••••••"/>
+                     onChange={(e) => setPasswordForm(p => ({ ...p, newPassword: e.target.value }))} placeholder="••••••••"/>
             </div>
             <div className="space-y-2">
               <Label htmlFor="confirmNewPassword">Xác nhận mật khẩu mới</Label>
               <Input id="confirmNewPassword" type="password" value={passwordForm.confirmNewPassword}
-                     onChange={(e) => handlePasswordInputChange("confirmNewPassword", e.target.value)} placeholder="••••••••"/>
+                     onChange={(e) => setPasswordForm(p => ({ ...p, confirmNewPassword: e.target.value }))} placeholder="••••••••"/>
             </div>
           </div>
           <div className="flex justify-end">

@@ -13,21 +13,22 @@ type Sender = "user" | "ai";
 type ChatMessage = { id: string; sender: Sender; content: string; time: string };
 
 export const ChatAI = () => {
-  const [selectedChat, setSelectedChat] = useState<number>(1);
+  const [selectedChat, setSelectedChat] = useState<number>(0);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const conversations = [
-    { id: 1, title: "Hỗ trợ học tập", time: "10:30", unread: 0 },
-    { id: 2, title: "Lập kế hoạch", time: "09:15", unread: 0 },
-    { id: 3, title: "Tư vấn môn học", time: "Hôm qua", unread: 0 },
-  ];
+  // == LỊCH SỬ CHAT (không còn danh sách cứng) ==
+  const [store, setStore] = useState<Record<number, ChatMessage[]>>({});
 
-  const [store, setStore] = useState<Record<number, ChatMessage[]>>({
-    1: [],
-    2: [],
-    3: [],
-  });
+  // Nếu chưa có cuộc trò chuyện nào, tạo một cuộc mới
+  useEffect(() => {
+    if (Object.keys(store).length === 0) {
+      const id = Date.now();
+      setStore({ [id]: [] });
+      setSelectedChat(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const listRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -48,11 +49,8 @@ export const ChatAI = () => {
       },
       // ChatRequestDTO { message: string }
       body: JSON.stringify({ message: text }),
-      // Không gửi cookie nếu backend chưa bật CORS credentials:
-      // credentials: "include",
     });
 
-    // Đọc payload dù là JSON hay text để thấy lý do 400 từ backend
     const ct = res.headers.get("content-type") || "";
     const payload = ct.includes("application/json")
       ? await res.json().catch(() => null)
@@ -63,13 +61,13 @@ export const ChatAI = () => {
       throw new Error(`HTTP ${res.status} ${res.statusText} - ${detail}`);
     }
 
-    // Backend ChatResource trả ChatResponseDTO { reply: string }
+   
     return (payload?.reply ?? payload?.response ?? "Không có phản hồi từ AI.");
   }
 
   const handleSendMessage = async () => {
     const text = message.trim();
-    if (!text || loading) return;
+    if (!text || loading || !selectedChat) return;
 
     const chatId = selectedChat;
     setMessage("");
@@ -95,6 +93,10 @@ export const ChatAI = () => {
   };
 
   const messages = store[selectedChat] ?? [];
+  const chatIds = Object.keys(store)
+    .map(Number)
+   
+    .sort((a, b) => b - a);
 
   return (
     <div className="space-y-6">
@@ -114,22 +116,24 @@ export const ChatAI = () => {
       </div>
 
       <div className="grid lg:grid-cols-4 gap-6 h-[600px]">
-        {/* Conversations List */}
+        {/* Lịch sử chat */}
         <Card className="lg:col-span-1">
           <CardContent className="p-0">
             <div className="p-4 border-b">
               <h3 className="font-semibold flex items-center space-x-2">
                 <MessageCircle className="h-4 w-4" />
-                <span>Cuộc trò chuyện</span>
+                <span>Lịch sử chat</span>
               </h3>
             </div>
+
             <div className="space-y-1">
-              {Object.entries({
-                ...conversations.reduce((a, c) => ({ ...a, [c.id]: c }), {} as Record<number, any>),
-                ...store,
-              }).map(([idStr]) => {
-                const id = Number(idStr);
-                const title = conversations.find((c) => c.id === id)?.title ?? `Chat #${id}`;
+              {chatIds.length === 0 && (
+                <div className="p-4 text-sm text-muted-foreground">Chưa có lịch sử. Hãy tạo cuộc trò chuyện mới.</div>
+              )}
+
+              {chatIds.map((id) => {
+                const last = store[id]?.at(-1);
+                const title = `Chat #${id}`;
                 return (
                   <div
                     key={id}
@@ -140,10 +144,10 @@ export const ChatAI = () => {
                   >
                     <div className="flex justify-between items-start">
                       <h4 className="font-medium text-sm">{title}</h4>
-                      <span className="text-xs text-muted-foreground">{store[id]?.at(-1)?.time ?? ""}</span>
+                      <span className="text-xs text-muted-foreground">{last?.time ?? ""}</span>
                     </div>
                     <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                      {store[id]?.at(-1)?.content ?? "Bắt đầu trò chuyện"}
+                      {last?.content ?? "Bắt đầu trò chuyện"}
                     </p>
                   </div>
                 );
@@ -152,7 +156,7 @@ export const ChatAI = () => {
           </CardContent>
         </Card>
 
-        {/* Chat Area */}
+        {/* Khu vực chat */}
         <Card className="lg:col-span-3 flex flex-col">
           {/* Header */}
           <div className="p-4 border-b flex items-center space-x-3">

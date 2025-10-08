@@ -39,9 +39,9 @@ type CourseDTO = {
   nameCourse: string;
   description?: string;
   room?: string;
-  dayWeek: string;        // "Thứ 2"..."Chủ nhật"
-  timeStudy: string;      // ISO start
-  timeStudyEnd?: string;  // ISO end
+  dayWeek: string;        
+  timeStudy: string;      
+  timeStudyEnd?: string;  
   color?: string;
 };
 
@@ -50,9 +50,9 @@ type CourseFormValues = {
   description: string;
   room: string;
   dayWeek: string;
-  studyDate: string; // yyyy-MM-dd
-  startTime: string; // HH:mm
-  endTime: string;   // HH:mm
+  studyDate: string; 
+  startTime: string; 
+  endTime: string;   
   color: string;
 };
 
@@ -85,7 +85,7 @@ const colorMap: Record<string, string> = {
   gray: "bg-gray-100 border-gray-300 text-gray-800",
 };
 
-/* === Dashboard cache sync (an toàn, không phụ thuộc module ngoài) === */
+
 type DashCourse = { time: string; subject: string; room: string };
 const TODAY_LABELS = ["Chủ nhật", "Thứ 2", "Thứ 3", "Thứ 4", "Thứ 5", "Thứ 6", "Thứ 7"]; // JS getDay() 0..6
 function todayLabel(): string {
@@ -107,9 +107,9 @@ function writeDashboardSchedule(list: CourseDTO[]) {
   try {
     const todayArr = toDashCoursesToday(list);
     localStorage.setItem("dashboard.schedule", JSON.stringify(todayArr));
-    // thông báo cho Dashboard lắng nghe
+
     window.dispatchEvent(new Event("dashboard:schedule-cache"));
-  } catch { /* noop */ }
+  } catch {}
 }
 
 /* ========= Component ========= */
@@ -133,11 +133,11 @@ export const Schedule = () => {
     setIsLoading(true);
     setError(null);
     try {
-      // lấy đúng lịch học của user
+  
       const res = await apiRequest<{ data: CourseDTO[] }>("/courses/my-courses", { method: "GET" });
       const list = res?.data ?? [];
       setCourses(list);
-      // ✅ ghi cache Dashboard cho "lịch hôm nay"
+      
       writeDashboardSchedule(list);
     } catch (err: any) {
       setError(err.message || "Không thể tải dữ liệu lịch học.");
@@ -170,7 +170,7 @@ export const Schedule = () => {
       }
 
       setDialogOpen(false);
-      await fetchCourses(); // ✅ fetch lại & auto cache
+      await fetchCourses(); 
     } catch (err: any) {
       form.setError("root", { message: err.message || "Thao tác thất bại." });
     }
@@ -180,7 +180,7 @@ export const Schedule = () => {
     if (!window.confirm("Bạn có chắc chắn muốn xóa môn học này?")) return;
     try {
       await apiRequest(`/courses/delete/${courseId}`, { method: "DELETE" });
-      await fetchCourses(); // ✅ fetch lại & auto cache
+      await fetchCourses(); 
     } catch (err: any) {
       setError(err.message || "Xóa thất bại.");
     }
@@ -213,7 +213,7 @@ export const Schedule = () => {
     setDialogOpen(true);
   };
 
-  /* ===== Weekly grid render helpers ===== */
+  
   const timeSlots = useMemo(() => {
     const slots: string[] = [];
     for (let h = 7; h < 20; h++) {
@@ -332,7 +332,7 @@ export const Schedule = () => {
         </CardContent>
       </Card>
 
-      {/* Dialog thêm/sửa */}
+      
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-[520px]">
           <DialogHeader>
