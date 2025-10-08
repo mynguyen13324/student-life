@@ -1,7 +1,7 @@
 // src/api/task.ts
 import { apiRequest } from "@/api/http";
 
-// Khớp với enum BE
+// ===== Types khớp BE =====
 export type TaskPriority = "LOW" | "MEDIUM" | "HIGH" | "URGENT";
 export type TaskStatus = "TODO" | "IN_PROGRESS" | "DONE" | "CANCELLED";
 
@@ -9,10 +9,10 @@ export type TaskDTO = {
   id: string;
   title: string;
   description?: string;
-  deadline?: string;        // ISO string
+  deadline?: string;        // ISO (LocalDateTime không 'Z' vẫn OK)
   status: TaskStatus;
   priority: TaskPriority;
-  courseId?: string | null; // nếu có liên kết Course
+  courseId?: string | null;
   createdDate?: string;
   lastModifiedDate?: string;
 };
@@ -20,7 +20,7 @@ export type TaskDTO = {
 export type InsertTaskDTO = {
   title: string;
   description?: string;
-  deadline?: string;       // "YYYY-MM-DDTHH:mm:ss"
+  deadline?: string;        // "YYYY-MM-DDTHH:mm:ss"
   status: TaskStatus;
   priority: TaskPriority;
   courseId?: string | null;
@@ -29,76 +29,96 @@ export type InsertTaskDTO = {
 export type UpdateTaskDTO = Partial<InsertTaskDTO>;
 
 export type SearchTaskDTO = {
-  keyword?: string;        // tìm theo title/description
+  title?: string | null;
+  description?: string | null;
   status?: TaskStatus | null;
   priority?: TaskPriority | null;
-  from?: string | null;    // ISO
-  to?: string | null;      // ISO
+  deadline?: string | null;     // Nếu BE search theo 1 deadline duy nhất
+  // Nếu BE hỗ trợ khoảng thời gian thì thêm: from?: string | null; to?: string | null;
 };
 
 export type Page<T> = {
   content: T[];
   totalElements: number;
   totalPages: number;
-  number: number;          // page index
-  size: number;
+  number: number;   // page index
+  size: number;     // page size
 };
 
 const base = "/tasks";
 
-// helpers phòng thủ
+// Helpers
 const clamp = (n: number, min: number, max = Infinity) =>
   Math.max(min, Math.min(max, Math.trunc(Number.isFinite(n as any) ? n : min)));
 
 const clean = <T extends Record<string, any>>(o: T) =>
   Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== undefined && v !== ""));
 
+// Chuẩn hoá mọi kiểu trả về về Page<TaskDTO>
+function toPage(listOrPage: any, pageIndex: number, pageSize: number): Page<TaskDTO> {
+  const d = listOrPage ?? [];
+  if (Array.isArray(d)) {
+    return {
+      content: d,
+      totalElements: d.length,
+      totalPages: 1,
+      number: pageIndex,
+      size: pageSize,
+    };
+  }
+  if (Array.isArray(d.content)) {
+    return {
+      content: d.content,
+      totalElements: d.totalElements ?? d.content.length,
+      totalPages: d.totalPages ?? 1,
+      number: d.number ?? pageIndex,
+      size: d.size ?? pageSize,
+    };
+  }
+  // fallback rỗng
+  return { content: [], totalElements: 0, totalPages: 0, number: pageIndex, size: pageSize };
+}
+
 export const TaskAPI = {
-  // POST /api/tasks/add
-  async add(dto: InsertTaskDTO) {
-    const body = clean(dto as any); // không gửi courseId=null, string rỗng...
-    return apiRequest<TaskDTO>(`${base}/add`, {
+  // CREATE — BE: POST /api/tasks/add
+  add: (dto: InsertTaskDTO) =>
+    apiRequest<TaskDTO>(`${base}/add`, {
       method: "POST",
-      body: JSON.stringify(body),
-    });
-  },
+      body: JSON.stringify(clean(dto as any)),
+    }),
 
-  // PUT /api/tasks/update/{id}
-  async update(id: string, dto: UpdateTaskDTO) {
-    const body = clean(dto as any);
-    return apiRequest<TaskDTO>(`${base}/update/${id}`, {
+  // UPDATE — BE: PUT /api/tasks/update/{id}
+  update: (id: string, dto: UpdateTaskDTO) =>
+    apiRequest<TaskDTO>(`${base}/update/${id}`, {
       method: "PUT",
-      body: JSON.stringify(body),
-    });
-  },
+      body: JSON.stringify(clean(dto as any)),
+    }),
 
-  // DELETE /api/tasks/delete/{id}
-  async remove(id: string) {
-    // Nếu BE trả 204, apiRequest sẽ trả null
-    return apiRequest<string | null>(`${base}/delete/${id}`, { method: "DELETE" });
-  },
+  // DELETE — BE: DELETE /api/tasks/delete/{id}
+  remove: (id: string) =>
+    apiRequest<string | null>(`${base}/delete/${id}`, { method: "DELETE" }),
 
-  // GET /api/tasks/{id}
-  async get(id: string) {
-    return apiRequest<TaskDTO>(`${base}/${id}`);
-  },
+  // (BE hiện không có GET /api/tasks/{id}; nếu cần thì bổ sung bên BE trước)
+  // get: (id: string) => apiRequest<TaskDTO>(`${base}/${id}`),
 
-  // POST /api/tasks/search?page=&size=
-  async search(body: SearchTaskDTO, page = 0, size = 10) {
-    size = clamp(size, 1);     // chặn size < 1
-    page = clamp(page, 0);     // chặn page < 0
-    const url = `${base}/search?page=${page}&size=${size}`;
-    const payload = clean(body as any); // bỏ field null/"" trong body search
-    return apiRequest<Page<TaskDTO>>(url, {
+  // SEARCH — BE: POST /api/tasks/search  (trả về ResponseDTO<List<TaskDTO>>)
+  // FE chuẩn hoá thành Page<TaskDTO> để Tasks.tsx dùng như cũ
+  async search(body: SearchTaskDTO = {}, pageIndex = 0, pageSize = 100) {
+    const payload = {
+      pageIndex: clamp(pageIndex, 0),
+      pageSize: clamp(pageSize, 1),
+      ...clean(body as any),
+    };
+    const res = await apiRequest<any>(`${base}/search`, {
       method: "POST",
       body: JSON.stringify(payload),
     });
+    // apiRequest đã unwrap ResponseDTO.data -> res là List<TaskDTO>
+    return toPage(res, payload.pageIndex, payload.pageSize);
   },
 };
 
-// =========================
-// Helpers chuyển đổi datetime
-// =========================
+// Helper datetime: Date -> "YYYY-MM-DDTHH:mm:ss" (LocalDateTime)
 export function toLocalDateTimeString(d: Date | string | undefined) {
   if (!d) return undefined;
   const x = typeof d === "string" ? new Date(d) : d;
@@ -109,6 +129,5 @@ export function toLocalDateTimeString(d: Date | string | undefined) {
   const HH = pad(x.getHours());
   const mm = pad(x.getMinutes());
   const ss = pad(x.getSeconds());
-  // Spring LocalDateTime thường ok với dạng này (không 'Z')
   return `${yyyy}-${MM}-${dd}T${HH}:${mm}:${ss}`;
 }

@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { logout as httpLogout } from '@/api/http';
 
 interface User {
   id: string;
@@ -34,68 +35,63 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Kiểm tra localStorage để khôi phục trạng thái đăng nhập
+    // Khôi phục user từ localStorage (nếu có)
     const savedUser = localStorage.getItem('user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      try {
+        setUser(JSON.parse(savedUser));
+      } catch {
+        localStorage.removeItem('user');
+      }
     }
     setLoading(false);
   }, []);
 
   const login = async (email: string, password: string): Promise<boolean> => {
+    // Mock (bạn có thể bỏ qua vì Login.tsx đang gọi API thực tế)
     setLoading(true);
     try {
-      // Simulate API call - trong thực tế bạn sẽ gọi API thật
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock validation - trong thực tế sẽ validate với server
+      await new Promise(resolve => setTimeout(resolve, 300));
       if (email === 'admin@example.com' && password === 'password') {
         const userData: User = {
           id: '1',
-          email: email,
+          email,
           name: 'Admin User',
           avatar: 'https://github.com/shadcn.png'
         };
         setUser(userData);
         localStorage.setItem('user', JSON.stringify(userData));
-        setLoading(false);
         return true;
-      } else {
-        setLoading(false);
-        return false;
       }
-    } catch (error) {
-      setLoading(false);
       return false;
+    } finally {
+      setLoading(false);
     }
   };
 
   const register = async (name: string, email: string, password: string): Promise<boolean> => {
+    // Mock (bạn có thể bỏ qua vì Register.tsx của bạn sẽ gọi API thực tế)
     setLoading(true);
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock registration - trong thực tế sẽ gửi data lên server
+      await new Promise(resolve => setTimeout(resolve, 300));
       const userData: User = {
         id: Date.now().toString(),
-        email: email,
-        name: name,
+        email,
+        name,
         avatar: 'https://github.com/shadcn.png'
       };
       setUser(userData);
       localStorage.setItem('user', JSON.stringify(userData));
-      setLoading(false);
       return true;
-    } catch (error) {
+    } finally {
       setLoading(false);
-      return false;
     }
   };
 
   const logout = () => {
+    // XÓA HẾT AT/RT/USER + điều hướng về /login
     setUser(null);
-    localStorage.removeItem('user');
+    httpLogout('user clicked logout');
   };
 
   const value: AuthContextType = {

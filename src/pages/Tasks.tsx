@@ -1,4 +1,4 @@
-// src/app/.../Task.tsx
+// src/pages/Tasks.tsx  (hoặc đường dẫn bạn đang dùng)
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -22,9 +22,9 @@ import { Plus, Calendar as CalendarIcon, CheckSquare, Search, Pencil, Trash2 } f
 
 import { TaskAPI, type TaskDTO } from "@/api/task";
 
-// ==========================
-// Helpers datetime (LocalDateTime chuỗi, không có 'Z')
-// ==========================
+/* ==========================
+   Helpers datetime (LocalDateTime chuỗi, không có 'Z')
+   ========================== */
 const timeRegex = /^([01]\d|2[0-3]):([0-5]\d)$/; // HH:MM
 const combineDateTimeToLocal = (date: Date, timeHHMM: string) => {
   const [h, m] = timeHHMM.split(":").map(Number);
@@ -37,9 +37,9 @@ const isoToDate = (iso?: string) => (iso ? new Date(iso) : undefined);
 const isoToTimeHHMM = (iso?: string) =>
   iso ? new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "09:00";
 
-// ==========================
-// UI types & map API <-> UI
-// ==========================
+/* ==========================
+   UI types & map API <-> UI
+   ========================== */
 type UiPriority = "high" | "medium" | "low";
 type UiStatus = "todo" | "doing" | "done";
 type UiCategory = "học tập" | "làm việc" | "khác"; // FE-only
@@ -76,9 +76,9 @@ const dtoToUi = (t: TaskDTO): UiTask => ({
   priority: apiPriorityToUi(t.priority),
 });
 
-// ==========================
-// LocalStorage cho category (FE-only)
-// ==========================
+/* ==========================
+   LocalStorage cho category (FE-only)
+   ========================== */
 const CAT_KEY = "task_ui_categories_v1";
 const loadCatMap = (): Record<string, UiCategory> => {
   try {
@@ -98,9 +98,38 @@ const removeCat = (id: string) => {
   localStorage.setItem(CAT_KEY, JSON.stringify(m));
 };
 
-// ==========================
-// Component
-// ==========================
+/* ==========================
+   Dashboard cache (ghi để Dashboard không cần gọi API)
+   ========================== */
+type DashTask = {
+  id: string;
+  title: string;
+  deadline: string;
+  category: UiCategory;
+  priority: UiPriority;
+  status: UiStatus;
+};
+const DASH_TASKS_KEY = "dashboard.tasks";
+
+function writeDashTasksFromUi(list: UiTask[]) {
+  const data: DashTask[] = list.map((t) => ({
+    id: t.id,
+    title: t.title,
+    deadline: t.deadline,
+    category: t.category,
+    priority: t.priority,
+    status: t.status,
+  }));
+  // sort deadline ASC
+  data.sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+  localStorage.setItem(DASH_TASKS_KEY, JSON.stringify(data));
+  // thông báo cho Dashboard
+  window.dispatchEvent(new Event("dashboard:tasks"));
+}
+
+/* ==========================
+   Component
+   ========================== */
 export const Tasks = () => {
   const [filterCategory, setFilterCategory] = useState<"all" | UiCategory>("all");
   const [searchTerm, setSearchTerm] = useState("");
@@ -116,7 +145,7 @@ export const Tasks = () => {
   const [loading, setLoading] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
-  // ====== Form schema ======
+  /* ====== Form schema ====== */
   const taskFormSchema = z
     .object({
       title: z.string().min(1, "Tiêu đề task là bắt buộc"),
@@ -145,11 +174,11 @@ export const Tasks = () => {
     },
   });
 
-  // ====== Load danh sách từ API ======
+  /* ====== Load danh sách từ API ====== */
   const loadTasks = async () => {
     try {
       setLoading(true);
-      const page = await TaskAPI.search({}, 0, 100); // ⬅️ apiRequest trả trực tiếp Page<TaskDTO>
+      const page = await TaskAPI.search({}, 0, 100); // apiRequest trả trực tiếp Page<TaskDTO>
       const catMap = loadCatMap();
       const list = page.content.map((d) => {
         const ui = dtoToUi(d);
@@ -157,6 +186,8 @@ export const Tasks = () => {
         return ui;
       });
       setTasks(list);
+      // ✅ ghi cache cho Dashboard
+      writeDashTasksFromUi(list);
     } catch (e) {
       console.error(e);
     } finally {
@@ -191,8 +222,8 @@ export const Tasks = () => {
           priority: uiPriorityToApi(values.priority),
         });
         // optimistic update + lưu category FE-only
-        setTasks((prev) =>
-          prev.map((t) =>
+        setTasks((prev) => {
+          const next = prev.map((t) =>
             t.id === editingTaskId
               ? {
                   ...t,
@@ -203,8 +234,11 @@ export const Tasks = () => {
                   priority: values.priority,
                 }
               : t
-          )
-        );
+          );
+          // ✅ ghi cache
+          writeDashTasksFromUi(next);
+          return next;
+        });
         saveCat(editingTaskId, values.category);
       } else {
         const created = await TaskAPI.add({
@@ -213,12 +247,16 @@ export const Tasks = () => {
           deadline,
           status: "TODO",
           priority: uiPriorityToApi(values.priority),
-          // không cần courseId nếu không dùng
         });
         const ui = dtoToUi(created);
         ui.category = values.category; // giữ category FE
         saveCat(ui.id, ui.category);
-        setTasks((prev) => [ui, ...prev]);
+        setTasks((prev) => {
+          const next = [ui, ...prev];
+          // ✅ ghi cache
+          writeDashTasksFromUi(next);
+          return next;
+        });
       }
     } catch (e) {
       console.error(e);
@@ -229,7 +267,7 @@ export const Tasks = () => {
     resetFormToCreate();
   };
 
-  // ====== Helpers render ======
+  /* ====== Helpers render ====== */
   const getStatusColor = (status: string) => {
     switch (status) {
       case "todo":
@@ -267,7 +305,7 @@ export const Tasks = () => {
     }
   };
 
-  // ====== Filter (FE) ======
+  /* ====== Filter (FE) ====== */
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
       const byCategory = filterCategory === "all" || task.category === filterCategory;
@@ -282,7 +320,7 @@ export const Tasks = () => {
     });
   }, [tasks, filterCategory, searchTerm, filterDate]);
 
-  // ====== CRUD UI helpers ======
+  /* ====== CRUD UI helpers ====== */
   const startEditTask = (taskId: string) => {
     const t = tasks.find((x) => x.id === taskId);
     if (!t) return;
@@ -307,7 +345,12 @@ export const Tasks = () => {
     if (!deleteCandidateId) return;
     try {
       await TaskAPI.remove(deleteCandidateId);
-      setTasks((prev) => prev.filter((x) => x.id !== deleteCandidateId));
+      setTasks((prev) => {
+        const next = prev.filter((x) => x.id !== deleteCandidateId);
+        // ✅ ghi cache
+        writeDashTasksFromUi(next);
+        return next;
+      });
       removeCat(deleteCandidateId);
     } catch (e) {
       console.error(e);
@@ -327,12 +370,22 @@ export const Tasks = () => {
   const toggleDone = async (task: UiTask, checked: boolean) => {
     const newUiStatus: UiStatus = checked ? "done" : "todo";
     const old = task.status;
-    setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: newUiStatus } : t)));
+    setTasks((prev) => {
+      const next = prev.map((t) => (t.id === task.id ? { ...t, status: newUiStatus } : t));
+      // ✅ ghi cache
+      writeDashTasksFromUi(next);
+      return next;
+    });
     try {
       await TaskAPI.update(task.id, { status: uiStatusToApi(newUiStatus) });
     } catch (e) {
       console.error(e);
-      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, status: old } : t)));
+      setTasks((prev) => {
+        const next = prev.map((t) => (t.id === task.id ? { ...t, status: old } : t));
+        // quay lại cache cũ
+        writeDashTasksFromUi(next);
+        return next;
+      });
       alert("Cập nhật trạng thái thất bại");
     }
   };

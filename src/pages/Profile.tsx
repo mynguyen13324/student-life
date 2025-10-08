@@ -1,140 +1,182 @@
-import { useState } from "react";
+// src/pages/Profile.tsx
+"use client";
+
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Camera, Save, User } from "lucide-react";
+import { Camera, Save, User, Loader2 } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { toast } from "sonner";
+
+/** Helper gọi API chuẩn ResponseDTO */
+async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const API_BASE_URL = (import.meta as any)?.env?.VITE_API_URL?.replace(/\/+$/,"") ?? "http://localhost:8080";
+  const headers: HeadersInit = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+
+  const token = localStorage.getItem('accessToken');
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/api${endpoint}`, { ...options, headers, mode: 'cors' });
+    const body = await res.json().catch(() => ({}));
+
+    if (res.status === 401) {
+      localStorage.removeItem('accessToken');
+      window.location.href = '/login';
+      throw new Error(body?.message || "Phiên đăng nhập đã hết hạn.");
+    }
+    if (!res.ok) {
+      throw new Error(body?.message || body?.error || `Lỗi ${res.status}`);
+    }
+    return body.data as T;
+  } catch (err: any) {
+    if (err?.name === 'TypeError' || `${err}`.includes('Failed to fetch')) {
+      throw new Error("Không kết nối được server (CORS/Network). Kiểm tra CORS và URL API.");
+    }
+    throw err;
+  }
+}
+
+type ProfileData = {
+  userName: string;
+  email: string;
+  university: string | null;
+  major: string | null;
+  yearOfStudy: number | null;
+};
 
 export const Profile = () => {
-  const [profileData, setProfileData] = useState({
-    name: "Nguyễn Văn A",
-    email: "nguyenvana@student.edu.vn",
-    school: "Đại học Công nghệ",
-    major: "Công nghệ thông tin",
-    phone: "0123456789",
-    address: "123 Đường ABC, Quận 1, TP.HCM",
-    year: "3"
-  });
-  const [passwordForm, setPasswordForm] = useState({
-    currentPassword: "",
-    newPassword: "",
-    confirmNewPassword: ""
-  });
+  const [profileData, setProfileData] = useState<ProfileData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleInputChange = (field: string, value: string) => {
-    setProfileData(prev => ({ ...prev, [field]: value }));
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setIsLoading(true);
+        const data = await apiRequest<ProfileData>('/users/profile');
+        setProfileData(data);
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    load();
+  }, []);
+
+  const handleInputChange = (field: keyof ProfileData, value: string | number | null) => {
+    setProfileData(prev => prev ? { ...prev, [field]: value } : prev);
   };
 
-  const handleSave = () => {
-    // Handle save profile logic here
-    console.log("Saving profile:", profileData);
-  };
-  const handleChangePassword = () => {
-    if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmNewPassword) {
-      console.log("Vui lòng điền đầy đủ thông tin mật khẩu");
-      return;
+  const handleSave = async () => {
+    if (!profileData) return;
+    setIsSaving(true);
+    try {
+      // Gọi API thật: PUT /api/users/profile
+      const updated = await apiRequest<ProfileData>('/users/profile', {
+        method: 'PUT',
+        body: JSON.stringify({
+          userName: profileData.userName,
+          university: profileData.university,
+          major: profileData.major,
+          yearOfStudy: profileData.yearOfStudy
+        })
+      });
+      setProfileData(updated);
+      toast.success("Hồ sơ đã được cập nhật!");
+    } catch (err: any) {
+      toast.error(err.message || "Cập nhật hồ sơ thất bại.");
+    } finally {
+      setIsSaving(false);
     }
+  };
+
+  const handlePasswordInputChange = (field: string, value: string) => {
+    setPasswordForm(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleChangePassword = async () => {
     if (passwordForm.newPassword !== passwordForm.confirmNewPassword) {
-      console.log("Mật khẩu mới và xác nhận không khớp");
+      toast.error("Mật khẩu mới và xác nhận không khớp.");
       return;
     }
-    // Handle change password logic here
-    console.log("Changing password:", { current: "********", next: "********" });
-    setPasswordForm({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
+    setIsChangingPassword(true);
+    try {
+      // Gọi API thật: POST /api/users/change-password
+      await apiRequest<unknown>('/users/change-password', {
+        method: 'POST',
+        body: JSON.stringify(passwordForm)
+      });
+      toast.success("Mật khẩu đã được thay đổi!");
+      setPasswordForm({ currentPassword: "", newPassword: "", confirmNewPassword: "" });
+    } catch (err: any) {
+      toast.error(err.message || "Đổi mật khẩu thất bại.");
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
+
+  if (isLoading) {
+    return <div className="flex justify-center items-center h-64"><Loader2 className="h-8 w-8 animate-spin" /></div>;
+  }
+  if (error || !profileData) {
+    return <Alert variant="destructive"><AlertDescription>{error || "Không thể tải dữ liệu hồ sơ."}</AlertDescription></Alert>;
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-4 md:p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-foreground">Hồ sơ cá nhân</h1>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Avatar Section */}
+        {/* Avatar */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-center">Ảnh đại diện</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle className="text-center">Ảnh đại diện</CardTitle></CardHeader>
           <CardContent className="flex flex-col items-center space-y-4">
             <Avatar className="h-32 w-32">
-              <AvatarImage src="" alt="Profile" />
-              <AvatarFallback className="text-2xl">
-                <User className="h-16 w-16" />
-              </AvatarFallback>
+              <AvatarImage src="" alt={profileData.userName} />
+              <AvatarFallback className="text-2xl"><User className="h-16 w-16" /></AvatarFallback>
             </Avatar>
-            <Button variant="outline" className="flex items-center space-x-2">
-              <Camera className="h-4 w-4" />
-              <span>Đổi ảnh</span>
-            </Button>
+            <Button variant="outline"><Camera className="h-4 w-4 mr-2" />Đổi ảnh</Button>
           </CardContent>
         </Card>
 
-        {/* Profile Form */}
+        {/* Form */}
         <div className="lg:col-span-2">
           <Card>
-            <CardHeader>
-              <CardTitle>Thông tin cá nhân</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>Thông tin cá nhân</CardTitle></CardHeader>
             <CardContent className="space-y-6">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="name">Họ và tên</Label>
-                  <Input
-                    id="name"
-                    value={profileData.name}
-                    onChange={(e) => handleInputChange("name", e.target.value)}
-                  />
+                  <Label htmlFor="userName">Họ và tên</Label>
+                  <Input id="userName" value={profileData.userName} onChange={(e) => handleInputChange("userName", e.target.value)} />
                 </div>
-
                 <div className="space-y-2">
-                  <Label htmlFor="school">Trường</Label>
-                  <Input
-                    id="school"
-                    value={profileData.school}
-                    onChange={(e) => handleInputChange("school", e.target.value)}
-                  />
+                  <Label htmlFor="university">Trường</Label>
+                  <Input id="university" value={profileData.university || ''} onChange={(e) => handleInputChange("university", e.target.value)} placeholder="Chưa có thông tin"/>
                 </div>
-
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={profileData.email}
-                    onChange={(e) => handleInputChange("email", e.target.value)}
-                  />
+                  <Input id="email" type="email" value={profileData.email} disabled />
                 </div>
-
-
                 <div className="space-y-2">
                   <Label htmlFor="major">Chuyên ngành</Label>
-                  <Select 
-                    value={profileData.major} 
-                    onValueChange={(value) => handleInputChange("major", value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Công nghệ thông tin">Công nghệ thông tin</SelectItem>
-                      <SelectItem value="Kỹ thuật phần mềm">Kỹ thuật phần mềm</SelectItem>
-                      <SelectItem value="Khoa học máy tính">Khoa học máy tính</SelectItem>
-                      <SelectItem value="Hệ thống thông tin">Hệ thống thông tin</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <Input id="major" value={profileData.major || ''} onChange={(e) => handleInputChange("major", e.target.value)} placeholder="Chưa có thông tin"/>
                 </div>
-
                 <div className="space-y-2">
-                  <Label htmlFor="year">Năm học</Label>
-                  <Select 
-                    value={profileData.year} 
-                    onValueChange={(value) => handleInputChange("year", value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
+                  <Label htmlFor="yearOfStudy">Năm học</Label>
+                  <Select value={String(profileData.yearOfStudy || '')} onValueChange={(v) => handleInputChange("yearOfStudy", v ? Number(v) : null)}>
+                    <SelectTrigger><SelectValue placeholder="Chọn năm học" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="1">Năm 1</SelectItem>
                       <SelectItem value="2">Năm 2</SelectItem>
@@ -147,8 +189,9 @@ export const Profile = () => {
               </div>
               <div className="flex justify-end space-x-2">
                 <Button variant="outline">Hủy</Button>
-                <Button onClick={handleSave} className="flex items-center space-x-2">
-                  <Save className="h-4 w-4" />
+                <Button onClick={handleSave} disabled={isSaving}>
+                  {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  <Save className="h-4 w-4 mr-2" />
                   <span>Lưu thay đổi</span>
                 </Button>
               </div>
@@ -156,50 +199,38 @@ export const Profile = () => {
           </Card>
         </div>
       </div>
-      
-      {/* Change Password */}
+
+      {/* Đổi mật khẩu */}
       <Card>
-        <CardHeader>
-          <CardTitle>Đổi mật khẩu</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Đổi mật khẩu</CardTitle></CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-3">
             <div className="space-y-2">
               <Label htmlFor="currentPassword">Mật khẩu hiện tại</Label>
-              <Input
-                id="currentPassword"
-                type="password"
-                value={passwordForm.currentPassword}
-                onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
-                placeholder="Nhập mật khẩu hiện tại"
-              />
+              <Input id="currentPassword" type="password" value={passwordForm.currentPassword}
+                     onChange={(e) => handlePasswordInputChange("currentPassword", e.target.value)} placeholder="••••••••"/>
             </div>
             <div className="space-y-2">
               <Label htmlFor="newPassword">Mật khẩu mới</Label>
-              <Input
-                id="newPassword"
-                type="password"
-                value={passwordForm.newPassword}
-                onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-                placeholder="Nhập mật khẩu mới"
-              />
+              <Input id="newPassword" type="password" value={passwordForm.newPassword}
+                     onChange={(e) => handlePasswordInputChange("newPassword", e.target.value)} placeholder="••••••••"/>
             </div>
             <div className="space-y-2">
               <Label htmlFor="confirmNewPassword">Xác nhận mật khẩu mới</Label>
-              <Input
-                id="confirmNewPassword"
-                type="password"
-                value={passwordForm.confirmNewPassword}
-                onChange={(e) => setPasswordForm({ ...passwordForm, confirmNewPassword: e.target.value })}
-                placeholder="Nhập lại mật khẩu mới"
-              />
+              <Input id="confirmNewPassword" type="password" value={passwordForm.confirmNewPassword}
+                     onChange={(e) => handlePasswordInputChange("confirmNewPassword", e.target.value)} placeholder="••••••••"/>
             </div>
           </div>
           <div className="flex justify-end">
-            <Button onClick={handleChangePassword}>Cập nhật mật khẩu</Button>
+            <Button onClick={handleChangePassword} disabled={isChangingPassword}>
+              {isChangingPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Cập nhật mật khẩu
+            </Button>
           </div>
         </CardContent>
       </Card>
     </div>
   );
 };
+
+export default Profile;

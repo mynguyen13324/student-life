@@ -5,7 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { ExpenseAPI, type ExpenseCategory, type SearchExpenseDTO } from "@/api/expense";
-import { toUi, toInsert, toUpdate, type UiExpense } from "../features/expenses/adapters";
+import { toUi, toInsert, toUpdate, type UiExpense } from "@/features/expenses/adapters";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,12 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogDescription,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -28,106 +23,217 @@ import {
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-// ❌ bỏ vì không dùng: import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Plus, TrendingUp, TrendingDown, PieChart, Target, AlertCircle, DollarSign, Pencil, Trash2 } from "lucide-react";
+import { Plus, TrendingDown, PieChart, Target, AlertCircle, DollarSign, Pencil, Trash2 } from "lucide-react";
 
-const categoryOptions: ExpenseCategory[] = [
-  "FOOD",
-  "STUDY",
-  "TRANSPORT",
-  "OTHER",
-];
-
-const paymentOptions = ["CASH", "BANK", "CARD", "EWALLET", "OTHER"];
+/* ===== constants & schema ===== */
+const categoryOptions: ExpenseCategory[] = ["FOOD","STUDY","TRANSPORT","OTHER"];
+const paymentOptions = ["CASH","BANK","CARD","EWALLET","OTHER"];
 
 const expenseFormSchema = z.object({
   amount: z.string().refine((v) => !isNaN(+v) && +v > 0, "Số tiền > 0"),
   category: z.string().min(1, "Chọn danh mục"),
   description: z.string().optional(),
-  date: z.string().min(1, "Chọn ngày"),       // yyyy-MM-dd
-  time: z.string().min(1, "Chọn giờ"),        // HH:mm
+  date: z.string().min(1, "Chọn ngày"),
+  time: z.string().min(1, "Chọn giờ"),
   paymentMethod: z.string().optional(),
 });
 
+/* ===== helpers for UI mapping ===== */
+function splitIso(iso?: string) {
+  if (!iso || typeof iso !== "string") {
+    const today = new Date();
+    const p = (n:number)=>String(n).padStart(2,"0");
+    return { date: `${today.getFullYear()}-${p(today.getMonth()+1)}-${p(today.getDate())}`, time: "00:00" };
+  }
+  const [d, t] = iso.split("T");
+  return { date: d || iso.slice(0,10), time: (t || "00:00:00").slice(0,5) };
+}
+function toUiSafe(dto: any): UiExpense {
+  try {
+    const mapped = toUi(dto);
+    if (!mapped.date || !mapped.time) {
+      const { date, time } = splitIso(dto?.expenseDate);
+      return { ...mapped, date, time };
+    }
+    return mapped;
+  } catch {
+    const { date, time } = splitIso(dto?.expenseDate);
+    return {
+      id: dto?.id ?? `${date}-${time}-${dto?.amount ?? 0}-${Math.random().toString(36).slice(2)}`,
+      amount: Number(dto?.amount ?? 0),
+      category: (dto?.category as ExpenseCategory) ?? "OTHER",
+      description: dto?.description ?? "",
+      date, time,
+      paymentMethod: dto?.paymentMethod ?? "CASH",
+    };
+  }
+}
+function isInSameMonth(dateStr: string, ref: Date) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  return d.getFullYear() === ref.getFullYear() && d.getMonth() === ref.getMonth();
+}
+function monthRange(ref: Date) {
+  const y = ref.getFullYear();
+  const m = ref.getMonth();
+  const pad = (n:number)=>String(n).padStart(2,"0");
+  const start = `${y}-${pad(m+1)}-01T00:00:00`;
+  const lastDay = new Date(y, m+1, 0).getDate();
+  const end = `${y}-${pad(m+1)}-${pad(lastDay)}T23:59:59`;
+  return { start, end };
+}
+
+/* ===== Dashboard cache helpers (localStorage) ===== */
+type ExpenseLite = {
+  id?: string;
+  amount: number;
+  category: string;
+  date: string;
+  time: string;
+  description?: string | null;
+  paymentMethod?: string | null;
+};
+const DASH_EXP_KEY = "dashboard.expensesCache";
+
+function readDash(): ExpenseLite[] {
+  try {
+    const raw = localStorage.getItem(DASH_EXP_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+function makeKey(e: ExpenseLite) {
+  return e.id ?? `${e.date}-${e.time}-${e.amount}-${e.category}`;
+}
+function toLite(e: UiExpense): ExpenseLite {
+  return {
+    id: e.id,
+    amount: e.amount,
+    category: e.category,
+    date: e.date,
+    time: e.time,
+    description: e.description ?? null,
+    paymentMethod: e.paymentMethod ?? null,
+  };
+}
+function writeDash(next: ExpenseLite[]) {
+  // sort desc by datetime
+  next.sort((a, b) => (b.date + "T" + (b.time || "00:00")).localeCompare(a.date + "T" + (a.time || "00:00")));
+  // giữ tối đa 100 bản ghi gần nhất để dashboard nhẹ
+  const trimmed = next.slice(0, 100);
+  localStorage.setItem(DASH_EXP_KEY, JSON.stringify(trimmed));
+  window.dispatchEvent(new Event("dashboard:expenses-cache"));
+}
+function mergeDash(addList: UiExpense[]) {
+  if (!addList.length) return;
+  const base = readDash();
+  const map = new Map<string, ExpenseLite>(base.map((x) => [makeKey(x), x]));
+  for (const it of addList) {
+    const lite = toLite(it);
+    map.set(makeKey(lite), lite);
+  }
+  writeDash(Array.from(map.values()));
+}
+function upsertDash(e: UiExpense) {
+  mergeDash([e]);
+}
+function removeFromDash(e: UiExpense) {
+  const base = readDash();
+  const key = makeKey(toLite(e));
+  writeDash(base.filter((x) => makeKey(x) !== key));
+}
+
 export default function Expenses() {
-  // ---- data state ----
+  /* ---- states ---- */
   const [items, setItems] = useState<UiExpense[]>([]);
   const [loading, setLoading] = useState(false);
   const [errMsg, setErrMsg] = useState("");
 
-  // ---- pagination ----
   const [pageSize, setPageSize] = useState(10);
   const [pageIndex, setPageIndex] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
 
-  // ---- filters ----
   const [fCategory, setFCategory] = useState<ExpenseCategory | "ALL">("ALL");
   const [fPayment, setFPayment] = useState<string | "ALL">("ALL");
   const [searchQuery, setSearchQuery] = useState<string>("");
 
-  // ẩn để không đổi API
   const [fMin, setFMin] = useState<string>("");
   const [fMax, setFMax] = useState<string>("");
   const [fStart, setFStart] = useState<string>("");
   const [fEnd, setFEnd] = useState<string>("");
 
-  // Đảm bảo “Tìm/Xóa lọc” kích hoạt refetch đúng lúc
   const [queryNonce, setQueryNonce] = useState(0);
 
-  // ---- dialog ----
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editing, setEditing] = useState<UiExpense | null>(null);
 
-  // ---- monthly budget ----
+  // Ngân sách tháng (localStorage)
   const [monthlyBudget, setMonthlyBudget] = useState<number>(() => {
     const saved = localStorage.getItem("monthlyBudget");
     const parsed = saved ? Number(saved) : NaN;
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 3000000;
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 5_000_000;
   });
   const [editBudgetOpen, setEditBudgetOpen] = useState(false);
   const [budgetInput, setBudgetInput] = useState<string>(String(monthlyBudget));
-  useEffect(() => {
-    localStorage.setItem("monthlyBudget", String(monthlyBudget));
-  }, [monthlyBudget]);
+  useEffect(() => { localStorage.setItem("monthlyBudget", String(monthlyBudget)); }, [monthlyBudget]);
   const handleSaveBudget = () => {
     const next = Number(budgetInput);
-    if (Number.isFinite(next) && next >= 0) {
-      setMonthlyBudget(next);
-      setEditBudgetOpen(false);
-    } else {
-      alert("Vui lòng nhập một số hợp lệ cho ngân sách.");
-    }
+    if (Number.isFinite(next) && next >= 0) { setMonthlyBudget(next); setEditBudgetOpen(false); }
+    else alert("Vui lòng nhập một số hợp lệ cho ngân sách.");
   };
 
-  // ---- forms ----
+  // ✅ Tổng chi của THÁNG HIỆN TẠI (độc lập với trang/pagination)
+  const [monthlySpent, setMonthlySpent] = useState<number>(0);
+
+  // Tính key tháng để khi sang tháng mới sẽ tự reload tổng
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${now.getMonth()}`;
+
+  // Hàm tính lại tổng chi trong tháng bằng cách query tất cả bản ghi của tháng hiện tại
+  const recalcMonthlySpent = async () => {
+    const { start, end } = monthRange(new Date());
+    const PS = 200;
+    let idx = 0;
+    let pages = 1;
+    let sum = 0;
+
+    while (idx < pages) {
+      const page = await ExpenseAPI.search({
+        pageIndex: idx,
+        pageSize: PS,
+        category: null,
+        minAmount: null,
+        maxAmount: null,
+        description: null,
+        startDate: start,
+        endDate: end,
+        paymentMethod: null,
+      } as SearchExpenseDTO);
+
+      const list = Array.isArray(page?.content) ? page.content : [];
+      for (const dto of list) {
+        const amount = typeof dto.amount === "string" ? Number(dto.amount) : (dto.amount as number);
+        sum += Number.isFinite(amount) ? amount : 0;
+      }
+
+      pages = page?.totalPages ?? 1;
+      idx += 1;
+    }
+    setMonthlySpent(sum);
+  };
+
   const form = useForm<z.infer<typeof expenseFormSchema>>({
     resolver: zodResolver(expenseFormSchema),
-    defaultValues: {
-      amount: "",
-      category: "",
-      description: "",
-      date: "",
-      time: "",
-      paymentMethod: "",
-    },
+    defaultValues: { amount: "", category: "", description: "", date: "", time: "", paymentMethod: "" },
   });
-
   const editForm = useForm<z.infer<typeof expenseFormSchema>>({
     resolver: zodResolver(expenseFormSchema),
-    defaultValues: {
-      amount: "",
-      category: "",
-      description: "",
-      date: "",
-      time: "",
-      paymentMethod: "",
-    },
+    defaultValues: { amount: "", category: "", description: "", date: "", time: "", paymentMethod: "" },
   });
 
-  // ---- fetch (chịu mọi shape) ----
+  /* ---- fetch (danh sách theo trang) ---- */
   const fetchData = async () => {
     setLoading(true);
     setErrMsg("");
@@ -135,29 +241,32 @@ export default function Expenses() {
       const payload: SearchExpenseDTO = {
         pageIndex,
         pageSize,
-        category: fCategory === "ALL" ? undefined : (fCategory as any),
-        description: searchQuery || undefined,
-        minAmount: fMin ? +fMin : undefined,
-        maxAmount: fMax ? +fMax : undefined,
-        startDate: fStart ? `${fStart}T00:00:00` : undefined,
-        endDate: fEnd ? `${fEnd}T23:59:59` : undefined,
-        paymentMethod: fPayment === "ALL" ? undefined : fPayment,
+        category: fCategory === "ALL" ? null : (fCategory as any),
+        description: searchQuery?.trim() ? searchQuery : null,
+        minAmount: fMin ? +fMin : null,
+        maxAmount: fMax ? +fMax : null,
+        startDate: fStart ? `${fStart}T00:00:00` : null,
+        endDate: fEnd ? `${fEnd}T23:59:59` : null,
+        paymentMethod: fPayment === "ALL" ? null : fPayment,
       };
 
-      const res = await ExpenseAPI.search(payload) as any;
+      const page = await ExpenseAPI.search(payload);
 
-      // Hỗ trợ cả 2 kiểu:
-      // - Page<ExpenseDTO>:        res.content
-      // - ResponseDTO<Page<...>>:  res.data.content
-      const page = res?.content ? res : (res?.data ?? res);
-      if (!page || !Array.isArray(page?.content)) {
+      if (!page || !Array.isArray(page.content)) {
         throw new Error("Dữ liệu trả về không đúng định dạng trang.");
       }
 
-      setItems((page.content as any[]).map(toUi));
+      const uiList = (page.content as any[]).map(toUiSafe);
+      setItems(uiList);
       setTotalPages(page.totalPages ?? 0);
+      setPageIndex(page.number ?? pageIndex);
+      setPageSize(page.size ?? pageSize);
+
+      // ✅ đồng bộ cache dashboard bằng trang dữ liệu mới nhất (ưu tiên tháng hiện tại)
+      const thisMonth = uiList.filter((x) => isInSameMonth(x.date, new Date()));
+      mergeDash(thisMonth.length ? thisMonth : uiList);
     } catch (e: any) {
-      console.error("Expense fetch error:", e);
+      console.error("[Expenses] fetch error:", e);
       setItems([]);
       setTotalPages(0);
       setErrMsg(e?.message || "Không thể tải dữ liệu chi tiêu.");
@@ -166,12 +275,13 @@ export default function Expenses() {
     }
   };
 
-  useEffect(() => {
-    fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pageIndex, pageSize, queryNonce]);
+  // Tải danh sách theo trang
+  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [pageIndex, pageSize, queryNonce]);
 
-  // ---- handlers ----
+  // Tính tổng chi tháng khi vừa vào/tháng đổi
+  useEffect(() => { recalcMonthlySpent(); }, [monthKey]);
+
+  /* ---- handlers ---- */
   const onSubmit = async (values: z.infer<typeof expenseFormSchema>) => {
     try {
       const ui: UiExpense = {
@@ -182,11 +292,29 @@ export default function Expenses() {
         time: values.time,
         paymentMethod: values.paymentMethod || "CASH",
       };
-      await ExpenseAPI.add(toInsert(ui));
+
+      const created = await ExpenseAPI.add(toInsert(ui));
+      const createdUi = toUiSafe(created);
+
+      // Hiển thị ngay trong bảng
+      setItems(prev => [createdUi, ...prev]);
+
+      // ✅ Cập nhật tổng chi tháng ngay lập tức nếu thuộc tháng hiện tại
+      if (isInSameMonth(createdUi.date, new Date())) {
+        setMonthlySpent(prev => prev + createdUi.amount);
+      }
+
+      // ✅ cập nhật cache dashboard
+      upsertDash(createdUi);
+
       setDialogOpen(false);
       form.reset();
-      await fetchData();
+
+      // đảm bảo thấy item mới ở trang 0 (và đồng bộ lại danh sách)
+      setPageIndex(0);
+      setQueryNonce(n => n + 1);
     } catch (e: any) {
+      console.error("[Expenses] add failed:", e);
       alert(e?.message || "Thêm chi tiêu thất bại");
     }
   };
@@ -196,7 +324,7 @@ export default function Expenses() {
     editForm.reset({
       amount: String(it.amount),
       category: it.category,
-      description: it.description || "",
+      description: it.description,
       date: it.date,
       time: it.time,
       paymentMethod: it.paymentMethod || "",
@@ -207,6 +335,8 @@ export default function Expenses() {
   const onEditSubmit = async (values: z.infer<typeof expenseFormSchema>) => {
     if (!editing?.id) return;
     try {
+      const before = editing;
+
       const ui: UiExpense = {
         id: editing.id,
         amount: +values.amount,
@@ -216,56 +346,101 @@ export default function Expenses() {
         time: values.time,
         paymentMethod: values.paymentMethod || "CASH",
       };
-      await ExpenseAPI.update(editing.id, toUpdate(ui));
+      const updated = await ExpenseAPI.update(editing.id, toUpdate(ui));
+      const afterUi = toUiSafe(updated);
+
       setEditDialogOpen(false);
       setEditing(null);
-      await fetchData();
+
+      // cập nhật trong bảng
+      setItems(prev => prev.map(x => (x.id === afterUi.id ? afterUi : x)));
+
+      // ✅ Điều chỉnh tổng chi tháng theo chênh lệch
+      const inMonthBefore = isInSameMonth(before.date, new Date());
+      const inMonthAfter = isInSameMonth(afterUi.date, new Date());
+      if (inMonthBefore && inMonthAfter) {
+        setMonthlySpent(prev => prev - before.amount + afterUi.amount);
+      } else if (inMonthBefore && !inMonthAfter) {
+        setMonthlySpent(prev => prev - before.amount);
+      } else if (!inMonthBefore && inMonthAfter) {
+        setMonthlySpent(prev => prev + afterUi.amount);
+      }
+
+      // ✅ cập nhật cache dashboard
+      upsertDash(afterUi);
+
+      // đồng bộ lại danh sách trang
+      setQueryNonce(n => n + 1);
     } catch (e: any) {
+      console.error("[Expenses] update failed:", e);
       alert(e?.message || "Cập nhật chi tiêu thất bại");
     }
   };
 
-  const onDelete = async (id?: string) => {
-    if (!id) return;
+  const onDelete = async (it?: UiExpense) => {
+    if (!it?.id) return;
     try {
-      await ExpenseAPI.remove(id);
-      await fetchData();
+      await ExpenseAPI.remove(it.id);
+
+      // xoá tại chỗ
+      setItems(prev => prev.filter(x => x.id !== it.id));
+
+      // ✅ giảm tổng chi tháng nếu bản ghi thuộc tháng hiện tại
+      if (isInSameMonth(it.date, new Date())) {
+        setMonthlySpent(prev => Math.max(0, prev - it.amount));
+      }
+
+      // ✅ cập nhật cache dashboard
+      removeFromDash(it);
+
+      // đồng bộ lại với BE (không ảnh hưởng tổng chi vì ta đã cập nhật ngay)
+      setQueryNonce(n => n + 1);
     } catch (e: any) {
+      console.error("[Expenses] delete failed:", e);
       alert(e?.message || "Xóa chi tiêu thất bại");
     }
   };
 
-  // ---- computed ----
-  const totalExpense = useMemo(
-    () => items.reduce((s, i) => s + i.amount, 0),
-    [items]
-  );
-  const totalIncome = 0;
-  const balance = totalIncome - totalExpense;
-  const totalSpentThisMonth = totalExpense;
-  const budgetUsagePercentage =
-    monthlyBudget > 0 ? Math.round((totalSpentThisMonth / monthlyBudget) * 100) : 0;
+  /* ---- computed (hiển thị) ---- */
+  // Tổng chi dùng state monthlySpent (đúng toàn tháng, không lệ thuộc trang)
+  const totalSpentThisMonth = monthlySpent;
 
-  const categorySpending: Record<string, number> = useMemo(() => {
-    return items.reduce((acc, curr) => {
+  // Số dư = Ngân sách tháng – Tổng chi (tháng này)
+  const balance = useMemo(
+    () => monthlyBudget - totalSpentThisMonth,
+    [monthlyBudget, totalSpentThisMonth]
+  );
+
+  // Biểu đồ: dùng dữ liệu đang hiển thị trong bảng (tránh gọi thêm nhiều request)
+  const nowRef = new Date();
+  const itemsThisMonth = useMemo(() => {
+    return items.filter((it) => isInSameMonth(it.date, nowRef));
+  }, [items]);
+
+  const categorySpendingThisMonth: Record<string, number> = useMemo(() => {
+    return itemsThisMonth.reduce((acc, curr) => {
       const key = curr.category || "OTHER";
       acc[key] = (acc[key] || 0) + curr.amount;
       return acc;
     }, {} as Record<string, number>);
-  }, [items]);
+  }, [itemsThisMonth]);
 
   const chartCategories = useMemo(() => {
     if (totalSpentThisMonth === 0) return [];
-    const colors = ["bg-primary", "bg-green-600", "bg-purple-500", "bg-orange-500", "bg-red-500"];
-    return Object.entries(categorySpending)
+    const colors = ["bg-primary","bg-green-600","bg-purple-500","bg-orange-500","bg-red-500"];
+    return Object.entries(categorySpendingThisMonth)
       .sort(([, a], [, b]) => b - a)
       .map(([name, amount], index) => {
         const pct = Math.round((amount / totalSpentThisMonth) * 100);
         return { name, amount, color: colors[index % colors.length], percentage: pct };
       });
-  }, [categorySpending, totalSpentThisMonth]);
+  }, [categorySpendingThisMonth, totalSpentThisMonth]);
 
-  // ===================== UI =====================
+  const budgetUsagePercentage = monthlyBudget > 0
+    ? Math.round((totalSpentThisMonth / monthlyBudget) * 100)
+    : 0;
+
+  /* ===== UI ===== */
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -276,7 +451,7 @@ export default function Expenses() {
           </div>
           <div>
             <h1 className="text-3xl font-bold text-foreground">Quản lý chi tiêu</h1>
-            <p className="text-muted-foreground">Theo dõi thu chi và ngân sách của bạn</p>
+            <p className="text-muted-foreground">Theo dõi chi và ngân sách của bạn</p>
           </div>
         </div>
 
@@ -405,31 +580,21 @@ export default function Expenses() {
       )}
 
       {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {/* Tổng chi (tháng này) */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Tổng thu</CardTitle>
-            <TrendingUp className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">
-              +{totalIncome.toLocaleString("vi-VN")} ₫
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Tổng chi</CardTitle>
+            <CardTitle className="text-sm font-medium">Tổng chi (tháng này)</CardTitle>
             <TrendingDown className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">
-              -{totalExpense.toLocaleString("vi-VN")} ₫
+              -{totalSpentThisMonth.toLocaleString("vi-VN")} ₫
             </div>
           </CardContent>
         </Card>
 
+        {/* Số dư = Ngân sách tháng – Tổng chi (tháng này) */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Số dư</CardTitle>
@@ -442,6 +607,7 @@ export default function Expenses() {
           </CardContent>
         </Card>
 
+        {/* Ngân sách tháng */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Ngân sách tháng</CardTitle>
@@ -493,12 +659,10 @@ export default function Expenses() {
         </Card>
       </div>
 
-      {/* Category Charts */}
+      {/* Phân tích chi tiêu (tháng này) */}
       <div className="grid gap-6 lg:grid-cols-1">
         <Card>
-          <CardHeader>
-            <CardTitle>Phân tích chi tiêu</CardTitle>
-          </CardHeader>
+          <CardHeader><CardTitle>Phân tích chi tiêu (tháng này)</CardTitle></CardHeader>
           <CardContent>
             {chartCategories.length > 0 ? (
               <div className="space-y-4">
@@ -521,7 +685,7 @@ export default function Expenses() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">Chưa có dữ liệu chi tiêu để hiển thị.</p>
+              <p className="text-sm text-muted-foreground">Chưa có dữ liệu chi tiêu trong tháng hiện tại.</p>
             )}
           </CardContent>
         </Card>
@@ -534,14 +698,10 @@ export default function Expenses() {
             <div>
               <Label>Danh mục</Label>
               <Select value={fCategory} onValueChange={(v) => setFCategory(v as any)}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Tất cả" />
-                </SelectTrigger>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Tất cả" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">Tất cả</SelectItem>
-                  {categoryOptions.map((c) => (
-                    <SelectItem key={c} value={c}>{c}</SelectItem>
-                  ))}
+                  {categoryOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -549,46 +709,27 @@ export default function Expenses() {
             <div>
               <Label>Phương thức</Label>
               <Select value={fPayment} onValueChange={(v) => setFPayment(v as any)}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder="Tất cả" />
-                </SelectTrigger>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Tất cả" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="ALL">Tất cả</SelectItem>
-                  {paymentOptions.map((p) => (
-                    <SelectItem key={p} value={p}>{p}</SelectItem>
-                  ))}
+                  {paymentOptions.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
 
             <div>
               <Label htmlFor="search">Tìm kiếm</Label>
-              <Input
-                id="search"
-                className="mt-1"
-                placeholder="Nhập mô tả..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
+              <Input id="search" className="mt-1" placeholder="Nhập mô tả..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
             </div>
           </div>
 
           <div className="flex items-end gap-2 mt-3">
             <Button onClick={() => { setPageIndex(0); setQueryNonce(n => n + 1); }}>Tìm</Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setFCategory("ALL");
-                setFPayment("ALL");
-                setSearchQuery("");
-                setFMin("");
-                setFMax("");
-                setFStart("");
-                setFEnd("");
-                setPageIndex(0);
-                setQueryNonce(n => n + 1);
-              }}
-            >
+            <Button variant="outline" onClick={() => {
+              setFCategory("ALL"); setFPayment("ALL"); setSearchQuery("");
+              setFMin(""); setFMax(""); setFStart(""); setFEnd("");
+              setPageIndex(0); setQueryNonce(n => n + 1);
+            }}>
               Xóa lọc
             </Button>
           </div>
@@ -597,9 +738,7 @@ export default function Expenses() {
 
       {/* Table */}
       <Card>
-        <CardHeader>
-          <CardTitle>Lịch sử giao dịch</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Lịch sử giao dịch</CardTitle></CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
@@ -626,14 +765,10 @@ export default function Expenses() {
                   <TableCell className="text-right text-red-600">-{it.amount.toLocaleString("vi-VN")} ₫</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" onClick={() => openEdit(it)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => openEdit(it)}><Pencil className="h-4 w-4" /></Button>
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button variant="destructive" size="sm" className="gap-1">
-                            <Trash2 className="h-4 w-4" /> Xóa
-                          </Button>
+                          <Button variant="destructive" size="sm" className="gap-1"><Trash2 className="h-4 w-4" /> Xóa</Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
@@ -642,7 +777,7 @@ export default function Expenses() {
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Hủy</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => onDelete(it.id)}>Xóa</AlertDialogAction>
+                            <AlertDialogAction onClick={() => onDelete(it)}>Xóa</AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>
                       </AlertDialog>
@@ -670,88 +805,42 @@ export default function Expenses() {
           </DialogHeader>
           <Form {...editForm}>
             <form onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
-              <FormField
-                name="amount"
-                control={editForm.control}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Số tiền (VND)</FormLabel>
-                    <FormControl><Input type="number" min="0" step={1000} {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <FormField name="amount" control={editForm.control} render={({ field }) => (
+                <FormItem><FormLabel>Số tiền (VND)</FormLabel><FormControl><Input type="number" min="0" step={1000} {...field} /></FormControl><FormMessage /></FormItem>
+              )}/>
               <div className="grid grid-cols-2 gap-4">
-                <FormField
-                  name="date"
-                  control={editForm.control}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Ngày</FormLabel>
-                      <FormControl><Input type="date" {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  name="time"
-                  control={editForm.control}
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Giờ</FormLabel>
-                      <FormControl><Input type="time" step={60} {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <FormField name="date" control={editForm.control} render={({ field }) => (
+                  <FormItem><FormLabel>Ngày</FormLabel><FormControl><Input type="date" {...field} /></FormControl><FormMessage /></FormItem>
+                )}/>
+                <FormField name="time" control={editForm.control} render={({ field }) => (
+                  <FormItem><FormLabel>Giờ</FormLabel><FormControl><Input type="time" step={60} {...field} /></FormControl><FormMessage /></FormItem>
+                )}/>
               </div>
-              <FormField
-                name="category"
-                control={editForm.control}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Danh mục</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        {categoryOptions.map((c) => (
-                          <SelectItem key={c} value={c}>{c}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                name="paymentMethod"
-                control={editForm.control}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Phương thức</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl><SelectTrigger><SelectValue placeholder="Chọn" /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        {paymentOptions.map((p) => (
-                          <SelectItem key={p} value={p}>{p}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                name="description"
-                control={editForm.control}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Mô tả</FormLabel>
-                    <FormControl><Input {...field} /></FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <FormField name="category" control={editForm.control} render={({ field }) => (
+                <FormItem><FormLabel>Danh mục</FormLabel>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      {categoryOptions.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}/>
+              <FormField name="paymentMethod" control={editForm.control} render={({ field }) => (
+                <FormItem><FormLabel>Phương thức</FormLabel>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <FormControl><SelectTrigger><SelectValue placeholder="Chọn" /></SelectTrigger></FormControl>
+                    <SelectContent>
+                      {paymentOptions.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}/>
+              <FormField name="description" control={editForm.control} render={({ field }) => (
+                <FormItem><FormLabel>Mô tả</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>
+              )}/>
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" onClick={() => setEditDialogOpen(false)}>Hủy</Button>
                 <Button type="submit">Lưu</Button>

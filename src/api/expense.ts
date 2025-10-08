@@ -1,84 +1,75 @@
 // src/api/expense.ts
-import { apiRequest } from "@/api/http";
+import { apiRequest } from "./http";
+
+export type ExpenseCategory = "FOOD" | "STUDY" | "TRANSPORT" | "OTHER";
+export type PaymentMethod = "CASH" | "BANK" | "CARD" | "EWALLET" | "OTHER";
+
+export type SearchExpenseDTO = {
+  pageIndex: number;
+  pageSize: number;
+  category?: ExpenseCategory | null;
+  minAmount?: number | null;
+  maxAmount?: number | null;
+  description?: string | null;
+  startDate?: string | null; // "YYYY-MM-DDTHH:mm:ss"
+  endDate?: string | null;   // "YYYY-MM-DDTHH:mm:ss"
+  paymentMethod?: string | null;
+};
 
 export type ExpenseDTO = {
   id: string;
-  amount: number;
+  amount: number | string; // BE có thể serialize BigDecimal thành string → FE vẫn nhận được
   category: ExpenseCategory;
-  description?: string;
-  expenseDate: string; // ISO LocalDateTime
-  paymentMethod?: string;
-
-  createdBy?: string;
-  createdDate?: string;
-  lastModifiedBy?: string;
-  lastModifiedDate?: string;
+  description?: string | null;
+  expenseDate: string;      // "YYYY-MM-DDTHH:mm:ss"
+  paymentMethod?: string | null;
 };
 
-export type InsertExpenseDTO = {
-  amount: number;
-  category: ExpenseCategory;
-  description?: string;
-  expenseDate: string;  // "YYYY-MM-DDTHH:mm:ss"
-  paymentMethod?: string;
-};
-export type UpdateExpenseDTO = InsertExpenseDTO;
-
-export type SearchExpenseDTO = {
-  pageSize: number;
-  pageIndex: number;     // 0-based
-  category?: ExpenseCategory;
-  minAmount?: number;
-  maxAmount?: number;
-  description?: string;
-  startDate?: string;    // "YYYY-MM-DDTHH:mm:ss"
-  endDate?: string;
-  paymentMethod?: string;
-};
-
-export type Page<T> = {
+export type PageDTO<T> = {
   content: T[];
-  totalElements: number;
-  totalPages: number;
   number: number;
   size: number;
-};
-
-export type ExpenseCategory =
-  | "FOOD"
-  | "TRANSPORT"
-  | "STUDY"
-  | "OTHER";
-
-// ⬇️ BE trả bọc trong ResponseDTO
-type Resp<T> = {
-  data: T;
-  status?: string;
-  message?: string;
-  code?: number;
-  success?: boolean;
+  totalElements: number;
+  totalPages: number;
 };
 
 export const ExpenseAPI = {
-  add: (dto: InsertExpenseDTO) =>
-    apiRequest<Resp<ExpenseDTO>>("/expenses/add", {
+  async search(payload: SearchExpenseDTO): Promise<PageDTO<ExpenseDTO>> {
+    // gửi null thay vì '' cho các filter rỗng → khớp BE
+    const clean: SearchExpenseDTO = {
+      pageIndex: payload.pageIndex,
+      pageSize: payload.pageSize,
+      category: payload.category ?? null,
+      minAmount: payload.minAmount ?? null,
+      maxAmount: payload.maxAmount ?? null,
+      description: payload.description?.trim() ? payload.description : null,
+      startDate: payload.startDate ?? null,
+      endDate: payload.endDate ?? null,
+      paymentMethod: payload.paymentMethod ?? null,
+    };
+    return apiRequest<PageDTO<ExpenseDTO>>(`/api/expenses/search`, {
+      method: "POST",
+      body: JSON.stringify(clean),
+    });
+  },
+
+  async add(dto: Omit<ExpenseDTO, "id">): Promise<ExpenseDTO> {
+    return apiRequest<ExpenseDTO>(`/api/expenses/add`, {
       method: "POST",
       body: JSON.stringify(dto),
-    }).then(r => r.data),
+    });
+  },
 
-  update: (id: string, dto: UpdateExpenseDTO) =>
-    apiRequest<Resp<ExpenseDTO>>(`/expenses/update/${id}`, {
+  async update(id: string, dto: Partial<Omit<ExpenseDTO, "id">>): Promise<ExpenseDTO> {
+    return apiRequest<ExpenseDTO>(`/api/expenses/update/${encodeURIComponent(id)}`, {
       method: "PUT",
       body: JSON.stringify(dto),
-    }).then(r => r.data),
+    });
+  },
 
-  remove: (id: string) =>
-    apiRequest<Resp<string>>(`/expenses/delete/${id}`, { method: "DELETE" })
-      .then(r => r.data),
-
-  search: (dto: SearchExpenseDTO) =>
-    apiRequest<Resp<Page<ExpenseDTO>>>("/expenses/search", {
-      method: "POST",
-      body: JSON.stringify(dto),
-    }).then(r => r.data), // ⬅️ Unwrap để FE nhận thẳng Page<ExpenseDTO>
+  async remove(id: string): Promise<string> {
+    return apiRequest<string>(`/api/expenses/delete/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
 };

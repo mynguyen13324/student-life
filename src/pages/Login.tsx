@@ -91,11 +91,6 @@ const Login = () => {
     setInfo('');
     setIsLoading(true);
 
-    // sau khi lưu token xong:
-    const from = (history.state && (history.state as any)?.usr?.from?.pathname) || "/";
-    navigate(from, { replace: true });
-
-
     try {
       const body = {
         userName: userName.trim(),
@@ -109,26 +104,25 @@ const Login = () => {
         body: JSON.stringify(body),
       });
 
-      // Lấy refreshToken từ "token" (cũ) hoặc "refreshToken" (mới)
+      // 2) LẤY & LƯU TOKEN
       const refreshToken =
         ('token' in loginData && loginData.token) ||
         ('refreshToken' in loginData && loginData.refreshToken);
       if (!refreshToken) throw new Error('Server không trả về refresh token');
 
-      // Nếu login đã trả accessToken thì dùng luôn; nếu không → gọi /users/refresh để đổi
       let accessToken =
         'accessToken' in loginData && loginData.accessToken ? loginData.accessToken : '';
 
       if (!accessToken) {
+        // đổi từ RT -> AT
         const refreshData = await apiRequest<RefreshRes>('/users/refresh', {
           method: 'POST',
           body: JSON.stringify({ refreshToken }),
         });
         accessToken = refreshData.accessToken;
-        // BE trả lại refreshToken (thường giống cũ) — ghi đè để đồng bộ
         localStorage.setItem('refreshToken', refreshData.refreshToken);
       } else {
-        // đồng bộ RT nếu BE mới có trả lại
+        // đồng bộ RT nếu BE mới có trả lại, nếu không thì dùng RT lấy từ login
         if ('refreshToken' in loginData && loginData.refreshToken) {
           localStorage.setItem('refreshToken', loginData.refreshToken);
         } else {
@@ -136,14 +130,19 @@ const Login = () => {
         }
       }
 
-      // 3) Lưu trữ token + user
+      // Lưu AT
       localStorage.setItem('accessToken', accessToken);
+
+      // Lưu user nếu có
       if ('userDTO' in loginData && loginData.userDTO) {
         localStorage.setItem('user', JSON.stringify(loginData.userDTO));
       }
 
+      // 3) ĐIỀU HƯỚNG SAU KHI TOKEN ĐÃ CÓ
+      const from =
+        (history.state && (history.state as any)?.usr?.from?.pathname) || '/';
       setInfo('Đăng nhập thành công! Đang chuyển hướng...');
-      setTimeout(() => navigate('/', { replace: true }), 400);
+      navigate(from, { replace: true });
     } catch (err: any) {
       console.error('❌ Lỗi đăng nhập:', err);
       setError(err?.message || 'Có lỗi xảy ra, vui lòng thử lại');
@@ -218,7 +217,9 @@ const Login = () => {
                 {isForgot ? 'Quên mật khẩu' : 'Đăng nhập'}
               </CardTitle>
               <CardDescription>
-                {isForgot ? 'Làm theo các bước để khôi phục mật khẩu' : 'Nhập thông tin để truy cập vào tài khoản của bạn'}
+                {isForgot
+                  ? 'Làm theo các bước để khôi phục mật khẩu'
+                  : 'Nhập thông tin để truy cập vào tài khoản của bạn'}
               </CardDescription>
             </CardHeader>
 

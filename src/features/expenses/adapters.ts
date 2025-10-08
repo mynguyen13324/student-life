@@ -1,76 +1,58 @@
 // src/features/expenses/adapters.ts
-
-import type {
-  ExpenseDTO,
-  InsertExpenseDTO,
-  UpdateExpenseDTO,
-  ExpenseCategory,
-} from "@/api/expense";
+import type { ExpenseCategory, ExpenseDTO, PaymentMethod } from "@/api/expense";
 
 export type UiExpense = {
-  id?: string;                 // id từ BE
-  amount: number;              // luôn dương (đơn vị VND)
+  id?: string;
+  amount: number;
   category: ExpenseCategory;
   description?: string;
-  date: string;                // "YYYY-MM-DD"
-  time: string;                // "HH:mm"
+  date: string; // "YYYY-MM-DD"
+  time: string; // "HH:mm"
   paymentMethod?: string;
 };
 
-// Helpers
-const pad2 = (n: number) => String(n).padStart(2, "0");
+function toNumber(v: unknown): number {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+  return 0;
+}
 
-/**
- * Parse ISO string (hoặc Date) -> tách về ngày/giờ theo local time
- * Nếu không hợp lệ, trả về rỗng để tránh crash UI
- */
-const splitIsoToDateTime = (iso: string | Date | undefined) => {
-  if (!iso) return { date: "", time: "" };
-  const d = typeof iso === "string" ? new Date(iso) : iso;
-  if (Number.isNaN(d.getTime())) return { date: "", time: "" };
-
-  const yyyy = d.getFullYear();
-  const mm = pad2(d.getMonth() + 1);
-  const dd = pad2(d.getDate());
-  const HH = pad2(d.getHours());
-  const MM = pad2(d.getMinutes());
-
-  return { date: `${yyyy}-${mm}-${dd}`, time: `${HH}:${MM}` };
-};
-
-/** Ghép "YYYY-MM-DD" + "HH:mm" thành "YYYY-MM-DDTHH:mm:00" */
-const joinDateTime = (date: string, time?: string) => {
-  const hhmm = time && /^\d{2}:\d{2}$/.test(time) ? time : "00:00";
-  return `${date}T${hhmm}:00`;
-};
-
-// =================== Adapters ===================
-
-export const toUi = (e: ExpenseDTO): UiExpense => {
-  const { date, time } = splitIsoToDateTime(e.expenseDate);
+export function toInsert(ui: UiExpense): Omit<ExpenseDTO, "id"> {
+  const hhmm = ui.time?.length === 5 ? `${ui.time}:00` : ui.time || "00:00:00";
   return {
-    id: e.id,
-    amount: Number(e.amount ?? 0),
-    category: e.category as ExpenseCategory,
-    description: e.description ?? "",
-    date,
-    time,
-    paymentMethod: e.paymentMethod ?? undefined,
+    amount: ui.amount,
+    category: ui.category,
+    description: ui.description || "",
+    expenseDate: `${ui.date}T${hhmm}`,
+    paymentMethod: (ui.paymentMethod as PaymentMethod) || "CASH",
   };
-};
+}
 
-export const toInsert = (u: UiExpense): InsertExpenseDTO => ({
-  amount: u.amount,
-  category: u.category,
-  description: u.description?.trim() ? u.description : undefined,
-  expenseDate: joinDateTime(u.date, u.time),
-  paymentMethod: u.paymentMethod?.trim() ? u.paymentMethod : undefined,
-});
+export function toUpdate(ui: UiExpense): Partial<Omit<ExpenseDTO, "id">> {
+  const hhmm = ui.time?.length === 5 ? `${ui.time}:00` : ui.time || "00:00:00";
+  return {
+    amount: ui.amount,
+    category: ui.category,
+    description: ui.description || "",
+    expenseDate: `${ui.date}T${hhmm}`,
+    paymentMethod: ui.paymentMethod || "CASH",
+  };
+}
 
-export const toUpdate = (u: UiExpense): UpdateExpenseDTO => ({
-  amount: u.amount,
-  category: u.category,
-  description: u.description?.trim() ? u.description : undefined,
-  expenseDate: joinDateTime(u.date, u.time),
-  paymentMethod: u.paymentMethod?.trim() ? u.paymentMethod : undefined,
-});
+export function toUi(dto: ExpenseDTO): UiExpense {
+  const [d, t = "00:00:00"] = (dto.expenseDate || "").split("T");
+  return {
+    id: dto.id,
+    amount: toNumber(dto.amount),
+    category: dto.category,
+    description: dto.description || "",
+    date: d || new Date().toISOString().slice(0, 10),
+    time: t.slice(0, 5),
+    paymentMethod: dto.paymentMethod || "CASH",
+  };
+}
+
+export const toUiSafe = toUi;

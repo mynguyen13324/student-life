@@ -1,4 +1,4 @@
-// ChatAI.tsx
+// src/pages/ChatAI.tsx
 import { useEffect, useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -6,25 +6,23 @@ import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Send, Plus, MessageCircle, Bot, User } from "lucide-react";
 
-/** Base URL backend (đổi nếu cần) */
-const API_URL = import.meta?.env?.VITE_API_URL ?? "http://localhost:8080";
+/** Base URL backend (đổi nếu cần) – luôn sạch dấu "/" cuối */
+const API_BASE = (import.meta?.env?.VITE_API_URL ?? "http://localhost:8080").replace(/\/+$/, "");
 
 type Sender = "user" | "ai";
 type ChatMessage = { id: string; sender: Sender; content: string; time: string };
 
 export const ChatAI = () => {
-  const [selectedChat, setSelectedChat] = useState(1);
+  const [selectedChat, setSelectedChat] = useState<number>(1);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // demo danh sách hội thoại (bạn có thể thay bằng data thật sau)
   const conversations = [
     { id: 1, title: "Hỗ trợ học tập", time: "10:30", unread: 0 },
     { id: 2, title: "Lập kế hoạch", time: "09:15", unread: 0 },
     { id: 3, title: "Tư vấn môn học", time: "Hôm qua", unread: 0 },
   ];
 
-  // messages theo từng cuộc chat (đơn giản: object {chatId: ChatMessage[]})
   const [store, setStore] = useState<Record<number, ChatMessage[]>>({
     1: [],
     2: [],
@@ -41,16 +39,32 @@ export const ChatAI = () => {
     setStore((s) => ({ ...s, [chatId]: [...(s[chatId] ?? []), m] }));
 
   async function callAI(text: string): Promise<string> {
-    const res = await fetch(`${API_URL}/api/chat`, {
+    const res = await fetch(`${API_BASE}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: text }), // ChatRequestDTO { message }
-      credentials: "include",
+      mode: "cors",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      // ChatRequestDTO { message: string }
+      body: JSON.stringify({ message: text }),
+      // Không gửi cookie nếu backend chưa bật CORS credentials:
+      // credentials: "include",
     });
-    if (!res.ok) throw new Error(await res.text().catch(() => res.statusText));
-    const data = await res.json();
-    // ChatResponseDTO { reply: string }
-    return data.reply ?? data.response ?? "Không có phản hồi từ AI.";
+
+    // Đọc payload dù là JSON hay text để thấy lý do 400 từ backend
+    const ct = res.headers.get("content-type") || "";
+    const payload = ct.includes("application/json")
+      ? await res.json().catch(() => null)
+      : await res.text().catch(() => "");
+
+    if (!res.ok) {
+      const detail = typeof payload === "string" ? payload : JSON.stringify(payload);
+      throw new Error(`HTTP ${res.status} ${res.statusText} - ${detail}`);
+    }
+
+    // Backend ChatResource trả ChatResponseDTO { reply: string }
+    return (payload?.reply ?? payload?.response ?? "Không có phản hồi từ AI.");
   }
 
   const handleSendMessage = async () => {
@@ -74,6 +88,7 @@ export const ChatAI = () => {
         content: `Lỗi gọi AI: ${e?.message ?? "unknown"}`,
         time: now(),
       });
+      console.error(e);
     } finally {
       setLoading(false);
     }
@@ -109,31 +124,30 @@ export const ChatAI = () => {
               </h3>
             </div>
             <div className="space-y-1">
-              {Object.entries({ ...conversations.reduce((a, c) => ({ ...a, [c.id]: c }), {} as any), ...store }).map(
-                ([idStr]) => {
-                  const id = Number(idStr);
-                  const title = conversations.find((c) => c.id === id)?.title ?? `Chat #${id}`;
-                  return (
-                    <div
-                      key={id}
-                      onClick={() => setSelectedChat(id)}
-                      className={`p-4 cursor-pointer hover:bg-muted/50 border-b transition-colors ${
-                        selectedChat === id ? "bg-accent" : ""
-                      }`}
-                    >
-                      <div className="flex justify-between items-start">
-                        <h4 className="font-medium text-sm">{title}</h4>
-                        <span className="text-xs text-muted-foreground">
-                          {store[id]?.at(-1)?.time ?? ""}
-                        </span>
-                      </div>
-                      <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
-                        {store[id]?.at(-1)?.content ?? "Bắt đầu trò chuyện"}
-                      </p>
+              {Object.entries({
+                ...conversations.reduce((a, c) => ({ ...a, [c.id]: c }), {} as Record<number, any>),
+                ...store,
+              }).map(([idStr]) => {
+                const id = Number(idStr);
+                const title = conversations.find((c) => c.id === id)?.title ?? `Chat #${id}`;
+                return (
+                  <div
+                    key={id}
+                    onClick={() => setSelectedChat(id)}
+                    className={`p-4 cursor-pointer hover:bg-muted/50 border-b transition-colors ${
+                      selectedChat === id ? "bg-accent" : ""
+                    }`}
+                  >
+                    <div className="flex justify-between items-start">
+                      <h4 className="font-medium text-sm">{title}</h4>
+                      <span className="text-xs text-muted-foreground">{store[id]?.at(-1)?.time ?? ""}</span>
                     </div>
-                  );
-                }
-              )}
+                    <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                      {store[id]?.at(-1)?.content ?? "Bắt đầu trò chuyện"}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -149,9 +163,7 @@ export const ChatAI = () => {
             </Avatar>
             <div>
               <h3 className="font-semibold">AI Assistant</h3>
-              <p className="text-sm text-muted-foreground">
-                {loading ? "AI đang trả lời..." : "Luôn sẵn sàng hỗ trợ"}
-              </p>
+              <p className="text-sm text-muted-foreground">{loading ? "AI đang trả lời..." : "Luôn sẵn sàng hỗ trợ"}</p>
             </div>
           </div>
 
@@ -187,9 +199,7 @@ export const ChatAI = () => {
                   </div>
                 </div>
               ))}
-              {loading && (
-                <div className="text-xs text-muted-foreground">Đang tạo câu trả lời…</div>
-              )}
+              {loading && <div className="text-xs text-muted-foreground">Đang tạo câu trả lời…</div>}
             </div>
           </CardContent>
 
@@ -200,7 +210,12 @@ export const ChatAI = () => {
                 placeholder="Nhập tin nhắn..."
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSendMessage();
+                  }
+                }}
                 className="flex-1"
                 disabled={loading}
               />
@@ -214,3 +229,5 @@ export const ChatAI = () => {
     </div>
   );
 };
+
+export default ChatAI;
